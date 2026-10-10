@@ -1,0 +1,38 @@
+// Laboratorium Junexis — Dom 1: pierwszy czujnik.
+// Symulacja działa lokalnie i publikuje przewidywalny pomiar salonu.
+
+struct SensorReading {
+    room: Text
+    air_quality: Float
+    observed_at: Time
+}
+
+task LivingRoomSensor() @server -> chan<SensorReading> {
+    config {
+        room: Text : "salon"
+        simulated_air_quality: Float : 420.0
+        interval: Duration : 2s
+    }
+
+    every config.interval {
+        let reading = SensorReading {
+            room: config.room,
+            air_quality: config.simulated_air_quality,
+            observed_at: now()
+        }
+
+        send reading
+    }
+}
+
+// Podgląd konsolowy nie podejmuje decyzji. Pozwala tylko zobaczyć dane,
+// zanim w kolejnych etapach dołączą reguła, wentylacja i panel domu.
+task MeasurementPreview(readings: chan<SensorReading>) @server {
+    for reading in readings {
+        log("POMIAR pokoj={reading.room} jakosc_powietrza={reading.air_quality:.0f} ppm")
+    }
+}
+
+pipeline FirstSensorFlow {
+    use LivingRoomSensor -> MeasurementPreview
+}

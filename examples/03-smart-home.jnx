@@ -1,0 +1,473 @@
+// PRZYKŁAD 3: Smart Home — wiele urządzeń, multi-platform, pełna konfiguracja
+// Demonstruje: multi-device, stream fanout, circuit_breaker, quirks, deployment
+
+// ===== TYPY DANYCH =====
+
+struct SensorReading {
+    device_id:   Text
+    celsius:     Float
+    humidity:    Float
+    motion:      Bool
+    air_quality: Float      // AQI score
+    timestamp:   Time
+}
+
+struct DeviceCommand {
+    target:     Text        // device_id
+    action:     Text        // "hvac_on", "fan_on", "light_on", etc.
+    intensity:  Float       // 0.0 - 1.0
+}
+
+struct SystemHealth {
+    devices_online:  Int
+    devices_offline: Int
+    avg_temp:        Float
+    alert_count:     Int
+    uptime:          Duration
+}
+
+enum AlertType {
+    HighTemperature,
+    LowTemperature,
+    HighCO2,
+    MotionDetected(Text),
+    DeviceOffline(Text)
+}
+
+struct HomeAlert {
+    alert_type: AlertType
+    severity:   u8            // 1-5
+    message:    Text
+    at:         Time
+}
+
+// ===== DEVICES =====
+
+device sensor_kitchen @embedded(esp32s3) {
+    hardware {
+        dht22_pin:      u8 : 4
+        co2_pin:        u8 : 5
+        motion_pin:     u8 : 6
+        busy_led_pin:   u8 : 2
+    }
+    network {
+        ip:   Text : "192.168.1.22"
+        port: u16  : 1883
+    }
+    native {
+        @cpp {
+            import:  "dht22_adafruit"
+            include: "WiFi.h"
+            library: "adafruit/DHT-sensor-library@^1.4.6"
+        }
+    }
+    timing {
+        sensor_poll: Duration : 5s
+        reconnect_max: Duration : 30s
+    }
+}
+
+device sensor_bedroom @embedded(esp32c3) {
+    hardware {
+        dht22_pin:  u8 : 4
+        motion_pin: u8 : 5
+    }
+    network {
+        ip:   Text : "192.168.1.23"
+        port: u16  : 1883
+    }
+    native {
+        @cpp {
+            import: "dht22_adafruit"
+        }
+    }
+    timing {
+        sensor_poll: Duration : 5s
+    }
+}
+
+device sensor_living_room @embedded(esp32s3) {
+    hardware {
+        dht22_pin:    u8 : 4
+        motion_pin:   u8 : 5
+        air_qual_pin: u8 : 34       // ADC pin dla MQ-135
+        display_sda:  u8 : 21
+        display_scl:  u8 : 22
+    }
+    network {
+        ip:   Text : "192.168.1.24"
+        port: u16  : 1883
+    }
+    native {
+        @cpp {
+            import:  "dht22_adafruit"
+            import:  "ssd1306_adafruit"
+            library: "adafruit/Adafruit_SSD1306@^2.5.7"
+        }
+    }
+}
+
+extern task dht_read_celsius(pin: u8) @embedded -> Float
+extern task dht_read_humidity(pin: u8) @embedded -> Float
+extern task digital_read(pin: u8) @embedded -> Bool
+extern task adc_read(pin: u8) @embedded -> u16
+extern task display_text(x: Int, y: Int, text: Text) @embedded
+extern task display_refresh() @embedded
+extern task digital_write(pin: u8, value: Bool) @embedded
+extern task pwm_write(pin: u8, value: Float) @embedded
+extern task is_on_cooldown(key: Text) @server -> Bool
+extern task set_cooldown(key: Text, duration: Duration) @server
+extern task count_online_devices() @server -> Int
+extern task count_total_devices() @server -> Int
+extern task get_avg_temp() @server -> Float
+extern task update_sensor_card(device_id: Text, reading: SensorReading) @report
+extern task show_alert_notification(alert: HomeAlert) @report
+extern task update_health_bar(health: SystemHealth) @report
+
+// ===== TASKS: EMBEDDED =====
+
+// Task jawnie dopasowany do kitchen — zgodny z aktualna gramatyka examples/CLI.
+task SensorKitchenTask() @embedded(sensor_kitchen) -> stream<SensorReading> {
+    config {
+        device_id:   Text     : "kitchen"
+        dht22_pin:   u8       : 4
+        motion_pin:  u8       : 6
+        sensor_poll: Duration : 5s
+    }
+
+    every config.sensor_poll {
+        let temp     = dht_read_celsius(config.dht22_pin)
+        let humidity = dht_read_humidity(config.dht22_pin)
+        let motion   = digital_read(config.motion_pin)
+
+        send SensorReading {
+            device_id: config.device_id,
+            celsius: temp,
+            humidity: humidity,
+            motion: motion,
+            air_quality: 0.0,
+            timestamp: now()
+        }
+    }
+}
+
+task SensorBedroomTask() @embedded(sensor_bedroom) -> stream<SensorReading> {
+    config {
+        device_id:   Text     : "bedroom"
+        dht22_pin:   u8       : 4
+        motion_pin:  u8       : 5
+        sensor_poll: Duration : 5s
+    }
+
+    every config.sensor_poll {
+        let temp     = dht_read_celsius(config.dht22_pin)
+        let humidity = dht_read_humidity(config.dht22_pin)
+        let motion   = digital_read(config.motion_pin)
+
+        send SensorReading {
+            device_id: config.device_id,
+            celsius: temp,
+            humidity: humidity,
+            motion: motion,
+            air_quality: 0.0,
+            timestamp: now()
+        }
+    }
+}
+
+// Task dedykowany dla living room — ma AQI sensor i display
+// Kompilator generuje: C++/PlatformIO, sensor_living_room.cpp (esp32s3), Adafruit_SSD1306, adc_read() dla AQI (×0.4885), display_text()/display_refresh() co 3 odczyty, mqtt.publish()
+task LivingRoomSensor() @embedded(sensor_living_room) -> stream<SensorReading> {
+    config {
+        device_id:   Text : "living_room"
+        dht22_pin:   u8   : 4
+        motion_pin:  u8   : 5
+        air_qual_pin: u8  : 34
+    }
+
+    state display_update_counter: Int = 0
+
+    every 5s {
+        let temp     = dht_read_celsius(config.dht22_pin)
+        let humidity = dht_read_humidity(config.dht22_pin)
+        let motion   = digital_read(config.motion_pin)
+        let aqi      = adc_read(config.air_qual_pin) as Float * 0.4885
+
+        send SensorReading {
+            device_id: config.device_id,
+            celsius: temp,
+            humidity: humidity,
+            motion: motion,
+            air_quality: aqi,
+            timestamp: now()
+        }
+
+        // Odświeżenie display co 3 odczyty (15s)
+        display_update_counter = display_update_counter + 1
+        if display_update_counter >= 3 {
+            display_text(0, 0, "Temp: {temp:.1f}C")
+            display_text(0, 10, "Humidity: {humidity:.0f}%")
+            display_text(0, 20, "AQI: {aqi:.0f}")
+            display_refresh()
+            display_update_counter = 0
+        }
+    }
+}
+
+// Task sterowania HVAC i fan (@embedded)
+// Kompilator generuje: C++/PlatformIO, actuator_kitchen.cpp (esp32c3), mqtt.subscribe() na DeviceCommand, digital_write(pin 12) dla HVAC, pwm_write(pin 13) dla fan
+task ActuatorController(
+    commands: chan<DeviceCommand>
+) @embedded(sensor_kitchen) {
+    // Kuchnia ma HVAC i wentylator
+    config {
+        hvac_pin: u8 : 12
+        fan_pin:  u8 : 13
+    }
+
+    for cmd in commands {
+        if cmd.target == "kitchen" {
+            match cmd.action {
+                "hvac_on"  -> digital_write(config.hvac_pin, true)
+                "hvac_off" -> digital_write(config.hvac_pin, false)
+                "fan_on"   -> pwm_write(config.fan_pin, cmd.intensity)
+                "fan_off"  -> pwm_write(config.fan_pin, 0.0)
+                _          -> { log("Unknown command: {cmd.action}") }
+            }
+        }
+    }
+}
+
+// ===== TASKS: SERVER =====
+
+// Agregator — zbiera odczyty ze wszystkich sensorów
+// Kompilator generuje: Go, goroutine z select{} nad 3 kanałami (kitchen/bedroom/living_room), fanout-merge → chan SensorReading
+task SensorAggregator(
+    kitchen:     stream<SensorReading>,
+    bedroom:     stream<SensorReading>,
+    living_room: stream<SensorReading>
+) @server -> stream<SensorReading> {
+    // Fanout + merge — kompilator generuje Go select{} lub C# Task.WhenAll
+    loop {
+        match recv_any(kitchen, bedroom, living_room) {
+            reading -> { send reading; }
+        }
+    }
+}
+
+// Analiza i alerty
+// Kompilator generuje: Go, goroutine, map[string]time.Time dla cooldownów (10 min), chan HomeAlert: HighTemperature/LowTemperature/HighCO2/MotionDetected
+task AlertEngine(
+    readings: stream<SensorReading>
+) @server -> stream<HomeAlert> {
+    config {
+        temp_high:   Float    : 28.0
+        temp_low:    Float    : 16.0
+        co2_high:    Float    : 1000.0
+        motion_zone_1: Text   : "kitchen"
+        motion_zone_2: Text   : "living_room"
+    }
+
+    state alert_cooldowns: Map<Text, Time> = {}
+
+    for r in readings {
+        // Temperatura wysoka
+        if r.celsius > config.temp_high {
+            if not is_on_cooldown("temp_high") {
+                send HomeAlert {
+                    alert_type: AlertType::HighTemperature,
+                    severity: 3,
+                    message: "High temp in {r.device_id}: {r.celsius:.1f}°C",
+                    at: r.timestamp
+                }
+                set_cooldown("temp_high", 10m)
+            }
+        }
+
+        // Temperatura niska
+        if r.celsius < config.temp_low {
+            if not is_on_cooldown("temp_low") {
+                send HomeAlert {
+                    alert_type: AlertType::LowTemperature,
+                    severity: 2,
+                    message: "Low temp in {r.device_id}: {r.celsius:.1f}°C",
+                    at: r.timestamp
+                }
+                set_cooldown("temp_low", 10m)
+            }
+        }
+
+        // Air quality
+        if r.air_quality > config.co2_high {
+            send HomeAlert {
+                alert_type: AlertType::HighCO2,
+                severity: 4,
+                message: "Poor air quality in {r.device_id}: AQI {r.air_quality:.0f}",
+                at: r.timestamp
+            }
+        }
+
+        // Ruch w strefach
+        if r.motion and (r.device_id == config.motion_zone_1 or r.device_id == config.motion_zone_2) {
+            send HomeAlert {
+                alert_type: AlertType::MotionDetected(r.device_id),
+                severity: 1,
+                message: "Motion detected in {r.device_id}",
+                at: r.timestamp
+            }
+        }
+    }
+}
+
+// HVAC Controller — generuje komendy sterujące
+// Kompilator generuje: Go, goroutine, hystereza temp (target 22°C ±1°C), bool hvac_on state, chan DeviceCommand publisher (hvac_on/hvac_off + intensity)
+task HVACController(
+    readings: stream<SensorReading>
+) @server -> chan<DeviceCommand> {
+    config {
+        target_temp: Float : 22.0
+        hysteresis:  Float : 1.0
+    }
+
+    state hvac_on: Bool = false
+
+    for r in readings {
+        let needs_cooling = r.celsius > config.target_temp + config.hysteresis
+        let needs_heating = r.celsius < config.target_temp - config.hysteresis
+
+        if needs_cooling and not hvac_on {
+            send DeviceCommand { target: r.device_id, action: "hvac_on", intensity: 1.0 }
+            hvac_on = true
+            log("HVAC ON: {r.device_id} temp={r.celsius:.1f}")
+        }
+
+        if needs_heating and not hvac_on {
+            send DeviceCommand { target: r.device_id, action: "hvac_on", intensity: 0.5 }
+            hvac_on = true
+            log("HVAC HEAT ON: {r.device_id} temp={r.celsius:.1f}")
+        }
+
+        if not needs_cooling and not needs_heating and hvac_on {
+            send DeviceCommand { target: r.device_id, action: "hvac_off", intensity: 0.0 }
+            hvac_on = false
+            log("HVAC OFF: {r.device_id} temp={r.celsius:.1f}")
+        }
+    }
+}
+
+// Health monitor — co minutę generuje raport
+// Kompilator generuje: Go, goroutine z time.Ticker(60s), count_online_devices()/count_total_devices()/get_avg_temp(), chan SystemHealth publisher
+task HealthMonitor() @server -> stream<SystemHealth> {
+    state start_time: Time = now()
+    state alert_count: Int = 0   // TODO: podłączyć strumień alertów
+
+    every 60s {
+        let online  = count_online_devices()
+        let offline = count_total_devices() - online
+
+        send SystemHealth {
+            devices_online: online,
+            devices_offline: offline,
+            avg_temp: get_avg_temp(),
+            alert_count: alert_count,
+            uptime: now() - start_time
+        }
+    }
+}
+
+// API REST dla zewnętrznych integracji (Alexa, Google Home, automation)
+// Kompilator generuje: Go, net/http router, GET /status /devices /devices/{id}/readings /alerts, POST /devices/{id}/command, OpenAPI 3.0 spec
+task SmartHomeApi() @server {
+    log("SmartHome API protocol bound externally")
+}
+
+task GetSystemStatus() @server -> SystemHealth { }
+task ListDevices() @server -> [Text] { }
+task GetDeviceReadings(id: Text, limit: u32) @server -> [SensorReading] { }
+task SendCommand(id: Text, cmd: DeviceCommand) @server -> Bool { }
+task GetAlerts(severity: u8, limit: u32) @server -> [HomeAlert] { }
+
+protocol SmartHomeApiRest {
+    GET /status                           -> GetSystemStatus()
+    GET /devices                          -> ListDevices()
+    GET /devices/{id: Text}/readings      -> GetDeviceReadings(query limit: u32)
+    POST /devices/{id: Text}/command      -> SendCommand(body cmd: DeviceCommand)
+    GET /alerts                           -> GetAlerts(query severity: u8, query limit: u32)
+}
+
+// ===== TASKS: REPORT =====
+
+// Kompilator generuje: TypeScript, 3 niezależne WebSocket subscriptions (readings/alerts/health), update_sensor_card()/show_alert_notification()/update_health_bar()
+task HomeControlDashboard(
+    readings: stream<SensorReading>,
+    alerts:   stream<HomeAlert>,
+    health:   stream<SystemHealth>
+) @report {
+    log("Smart Home Dashboard initializing...")
+
+    // Kompilator generuje trzy niezależne WebSocket subscriptions
+    for reading in readings {
+        update_sensor_card(reading.device_id, reading)
+    }
+
+    for alert in alerts {
+        show_alert_notification(alert)
+    }
+
+    for h in health {
+        update_health_bar(h)
+    }
+}
+
+// ===== PIPELINE =====
+
+pipeline SmartHome {
+    // Agregacja sensorów
+    use SensorKitchenTask             -> SensorAggregator.kitchen
+    use SensorBedroomTask             -> SensorAggregator.bedroom
+    use LivingRoomSensor              -> SensorAggregator.living_room
+
+    // Logika biznesowa
+    use SensorAggregator -> AlertEngine
+    use SensorAggregator -> HVACController
+    use HVACController   -> ActuatorController
+
+    // Monitoring
+    use HealthMonitor -> HomeControlDashboard.health
+
+    // Dashboard
+    use SensorAggregator -> HomeControlDashboard.readings
+    use AlertEngine      -> HomeControlDashboard.alerts
+}
+
+// ===== DEPLOYMENT =====
+
+deployment Production {
+    server_host: Text : "192.168.1.10"
+    mqtt_broker: Text : "mqtt://192.168.1.10:1883"
+
+    sensor_kitchen     -> server: "192.168.1.10:8080"
+    sensor_bedroom     -> server: "192.168.1.10:8080"
+    sensor_living_room -> server: "192.168.1.10:8080"
+}
+
+// ===== QUIRKS (EXPERIMENTAL) =====
+
+// ESP32-C3 ma znany bug z USB-Serial — log przez WiFi fallback
+quirks "esp32c3" {
+    usb_serial_workaround {
+        description: "ESP32-C3 USB CDC conflicts with WiFi at boot"
+        affects:     ["Serial.begin()", "USB CDC init"]
+        workaround:  "Use UART0 for logging after WiFi init"
+    }
+}
+
+// ===== NARRATIVE (EXPERIMENTAL) =====
+
+narrative "Smart Home Automation" {
+    intent "automate home climate control based on real-time sensor data"
+    stakeholders ["homeowner", "home-automation-platform"]
+    compliance "GDPR (no biometric data, motion data anonymized)"
+    trace sampled(rate: 5%)
+    applies_to { SensorAggregator, AlertEngine, HVACController }
+}

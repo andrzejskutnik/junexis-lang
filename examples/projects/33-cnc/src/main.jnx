@@ -1,0 +1,219 @@
+// PRZYKŁAD 33: CNC safety-oriented control demo
+//
+// Cel: pokazać, że Junexis może opisywać architekturę sterowania CNC:
+// panel operatora, planner, kolejkę ruchu, sterownik embedded i obserwowalność.
+//
+// WAŻNE: To jest demonstracja architektury i granic odpowiedzialności.
+// Nie jest to gotowy firmware do realnej maszyny CNC.
+
+// ===== TYPY DANYCH =====
+
+struct ToolpathSegment {
+    job_id: Text
+    line_no: Int
+    x: Float
+    y: Float
+    z: Float
+    feed_rate: Float
+    spindle_rpm: Int
+}
+
+struct MotionCommand {
+    job_id: Text
+    seq: Int
+    kind: Text
+    x: Float
+    y: Float
+    z: Float
+    feed_rate: Float
+    spindle_rpm: Int
+}
+
+struct MachinePosition {
+    x: Float
+    y: Float
+    z: Float
+    at: Time
+}
+
+struct MachineState {
+    status: Text
+    position: MachinePosition
+    active_job: Text
+    spindle_rpm: Int
+    at: Time
+}
+
+struct SafetyEvent {
+    level: Text
+    code: Text
+    message: Text
+    at: Time
+}
+
+// ===== DEVICE =====
+
+device cnc_controller @embedded(esp32c3) {
+    hardware {
+        x_step_pin: u8 : 2
+        y_step_pin: u8 : 3
+        z_step_pin: u8 : 4
+        spindle_pwm_pin: u8 : 5
+        emergency_stop_pin: u8 : 6
+    }
+}
+
+// ===== EXTERN: GRANICA DO PRAWDZIWEGO STEROWNIKA RUCHU =====
+
+extern motion MotionDriver {
+    target embedded
+    language cpp
+    file "user/embedded/motion_driver.cpp"
+
+    fn enable()
+    fn move_linear(cmd: MotionCommand)
+    fn emergency_stop(reason: Text)
+    fn read_position() -> MachinePosition
+    fn limit_switch_active() -> Bool
+}
+
+extern task MotionDriver_enable() @embedded
+extern task MotionDriver_move_linear(cmd: MotionCommand) @embedded
+extern task MotionDriver_emergency_stop(reason: Text) @embedded
+extern task MotionDriver_read_position() @embedded -> MachinePosition
+extern task MotionDriver_limit_switch_active() @embedded -> Bool
+
+// ===== TASKI =====
+
+// Operator/report generuje mały demonstracyjny toolpath.
+// W realnym systemie byłby to UI z importem G-code, walidacją i potwierdzeniem operatora.
+task OperatorPanel() @report -> chan<ToolpathSegment> {
+    every 1s {
+        send ToolpathSegment {
+            job_id: "demo-square",
+            line_no: 1,
+            x: 10.0,
+            y: 0.0,
+            z: -1.0,
+            feed_rate: 120.0,
+            spindle_rpm: 8000
+        }
+    }
+}
+
+// Server pełni rolę plannera: nie dotyka silników, tylko waliduje i tworzy
+// bezpieczne, jawne komendy ruchu.
+task CncPlanner(segments: chan<ToolpathSegment>) @server -> chan<MotionCommand> {
+    config {
+        max_feed_rate: Float : 500.0
+        safe_z: Float : 5.0
+    }
+
+    for segment in segments {
+        let feed_ok = segment.feed_rate <= config.max_feed_rate
+        let z_ok = segment.z <= config.safe_z
+
+        if feed_ok and z_ok {
+            send MotionCommand {
+                job_id: segment.job_id,
+                seq: segment.line_no,
+                kind: "linear",
+                x: segment.x,
+                y: segment.y,
+                z: segment.z,
+                feed_rate: segment.feed_rate,
+                spindle_rpm: segment.spindle_rpm
+            }
+        }
+    }
+}
+
+// Embedded wykonuje komendy przez MotionDriver. Junexis pilnuje przepływu,
+// ale realne timingi kroków, akceleracje i HAL należą do kodu extern.
+task MotionController(commands: chan<MotionCommand>) @embedded(cnc_controller) -> chan<MachineState> {
+    MotionDriver_enable()
+
+    for cmd in commands {
+        MotionDriver_move_linear(cmd)
+        let pos = MotionDriver_read_position()
+
+        send MachineState {
+            status: "moving",
+            position: pos,
+            active_job: cmd.job_id,
+            spindle_rpm: cmd.spindle_rpm,
+            at: now()
+        }
+    }
+}
+
+// Niezależny monitor bezpieczeństwa. W realnym systemie e-stop musi mieć także
+// fizyczną, sprzętową ścieżkę odcięcia — Junexis opisuje warstwę obserwowalną.
+task SafetyMonitor() @embedded(cnc_controller) -> chan<SafetyEvent> {
+    every 50ms {
+        let limit_hit = MotionDriver_limit_switch_active()
+
+        if limit_hit {
+            MotionDriver_emergency_stop("limit switch active")
+            send SafetyEvent {
+                level: "critical",
+                code: "LIMIT_SWITCH",
+                message: "Limit switch active - motion stopped",
+                at: now()
+            }
+        }
+    }
+}
+
+task MachineStateDashboard(states: chan<MachineState>) @report {
+    for machine_state in states {
+        log("CNC machine state: {machine_state.status}")
+    }
+}
+
+task SafetyDashboard(safety: chan<SafetyEvent>) @report {
+    for event in safety {
+        log("CNC safety event: {event.level} {event.code}")
+    }
+}
+
+// ===== PIPELINE =====
+
+pipeline CncDemo {
+    use OperatorPanel -> CncPlanner
+    use CncPlanner -> MotionController
+    use MotionController -> MachineStateDashboard
+    use SafetyMonitor -> SafetyDashboard
+}
+
+// ===== NARRATIVE =====
+
+narrative CncSafetyStory {
+    intent "Show how Junexis separates CNC planning, embedded motion, safety monitoring and operator visibility."
+    audience ["developer", "operator", "mentor"]
+
+    system_role {
+        report   "Operator-facing job source and dashboards. It can observe and request motion, but it does not own real-time motor control."
+        server   "Planner and validator. It converts toolpath segments into explicit MotionCommand values and applies non-real-time safety constraints."
+        embedded "Motion boundary and safety monitor. It calls the developer-owned MotionDriver and reports observable state and safety events."
+    }
+
+    extern_boundary {
+        motion_driver "MotionDriver is developer-owned C++ code. Junexis owns the contract and generated adapter, not the certified motion-control implementation."
+        generated     "out/ is a generated build tree and may be recreated."
+        user_owned    "user/embedded/motion_driver.cpp is the source of truth for the developer-owned motion adapter."
+    }
+
+    safety_limits {
+        not_firmware "This is not certified CNC firmware and must not be used to control a real machine."
+        hardware_estop "Real CNC requires a physical emergency-stop path independent from generated software."
+        motion_profile "Acceleration, jerk, spindle control, homing and kinematics belong to tested motion-control code outside this demo."
+        validation "All generated artifacts must pass check, compile and artifact-gate before the example is treated as healthy."
+    }
+
+    mentor_notes {
+        explain "Start from the pipeline: OperatorPanel -> CncPlanner -> MotionController, with SafetyMonitor running independently."
+        warn    "Do not confuse architecture demonstration with machine safety certification."
+        inspect "When debugging, inspect extern motion ownership before generated embedded code."
+    }
+}

@@ -1,0 +1,80 @@
+// grammar/03-fn.jnx
+// Pokrycie: fnDeclaration, fnBody, parameterList,
+//           parameter (z i bez default), returnStatement
+
+// ─── fn bez parametrów, bez zwracanego typu ───────────────────────────
+fn doNothing() {
+}
+
+// ─── fn bez parametrów, z typem zwracanym ─────────────────────────────
+fn currentTimestamp() -> Time {
+    return now()
+}
+
+// ─── fn z jednym parametrem ───────────────────────────────────────────
+fn double(x: Int) -> Int {
+    return x * 2
+}
+
+// ─── fn z wieloma parametrami ─────────────────────────────────────────
+fn clamp(value: Float, min: Float, max: Float) -> Float {
+    if value < min {
+        return min
+    }
+    if value > max {
+        return max
+    }
+    return value
+}
+
+// ─── fn z parametrem z wartością domyślną ─────────────────────────────
+fn greet(name: Text, prefix: Text = "Hello") -> Text {
+    return "{prefix}, {name}!"
+}
+
+// ─── fn z union jako typem zwracanym ──────────────────────────────────
+fn parseNumber(s: Text) -> Int | Float {
+    return 0
+}
+
+// ─── fn z typem komunikacyjnym jako parametrem ────────────────────────
+fn drain(ch: chan<Int>) -> [Int] {
+    let result: [Int] = []
+    return result
+}
+
+// ─── fn z Map ─────────────────────────────────────────────────────────
+fn invertMap(m: Map<Text, Int>) -> Map<Int, Text> {
+    let result: Map<Int, Text> = {}
+    return result
+}
+
+// ─── fn z tablicą ─────────────────────────────────────────────────────
+fn sum(values: [Float]) -> Float {
+    let acc: Float = 0.0
+    for v in values {
+        acc += v
+    }
+    return acc
+}
+
+// ─── fn rekurencyjna ──────────────────────────────────────────────────
+fn factorial(n: u64) -> u64 {
+    if n <= 1 {
+        return 1
+    }
+    return n * factorial(n - 1)
+}
+
+// ─── fn z wieloma return paths ────────────────────────────────────────
+fn max(a: Int, b: Int) -> Int {
+    if a > b {
+        return a
+    }
+    return b
+}
+
+// ─── fn bez return (void-like) z logiką ───────────────────────────────
+fn logError(msg: Text, code: u32) {
+    log(msg, code)
+}

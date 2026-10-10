@@ -1,0 +1,57 @@
+// Podstawowy przykład monitorowania temperatury w JunexisLang
+// Demonstruje proste potoki danych: odczyt -> przetwarzanie -> logowanie
+
+struct OdczytTemperatury {
+    czujnik_id: Text,
+    wartosc: f32,
+    jednostka: Text,
+    znacznik_czasu: u64
+}
+
+struct Alert {
+    poziom: Text,
+    wiadomosc: Text,
+    wartosc: f32,
+    znacznik_czasu: u64
+}
+
+// Zadanie odczytu temperatury działające na urządzeniu embedded
+task CzytajTemperature() @embedded(esp32c3) -> chan<OdczytTemperatury> {
+    every 5s {
+        var odczyt = OdczytTemperatury {
+            czujnik_id: "czujnik_01",
+            wartosc: 23.5,
+            jednostka: "celsius",
+            znacznik_czasu: 0
+        };
+        send odczyt;
+    }
+}
+
+// Zadanie przetwarzania alertów działające po stronie serwera
+task PrzetwarzajAlertyTemperatury(wejscie: chan<OdczytTemperatury>) @server -> chan<Alert> {
+    for odczyt in wejscie {
+        if odczyt.wartosc > 35.0 {
+            var alert = Alert {
+                poziom: "ostrzezenie",
+                wiadomosc: "Temperatura przekracza prog",
+                wartosc: odczyt.wartosc,
+                znacznik_czasu: odczyt.znacznik_czasu
+            };
+            send alert;
+        }
+    }
+}
+
+// Zadanie logowania danych
+task LogujDane(wejscie: chan<Alert>) @server {
+    for alert in wejscie {
+        log("Alert: " + alert.poziom + " - " + alert.wiadomosc);
+    }
+}
+
+// Definicja potoku
+pipeline MonitorTemperatury {
+    use CzytajTemperature -> PrzetwarzajAlertyTemperatury;
+    use PrzetwarzajAlertyTemperatury -> LogujDane;
+}

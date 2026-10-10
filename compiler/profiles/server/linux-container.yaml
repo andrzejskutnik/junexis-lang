@@ -1,0 +1,28 @@
+# Linux Container Server Profile
+# Inherits the generic Linux server profile and narrows limits for containerized workloads.
+
+version: "1.0"
+platform: "@server"
+variant: "linux-container"
+extends: "linux"
+
+metadata:
+  description: "Containerized Linux server profile for microservices and workers"
+  manufacturer: "OCI-compatible runtime"
+  architecture: "x86_64, ARM64"
+  frequency: "Shared host CPU"
+  releaseYear: 2013
+
+limits:
+  maxMemoryBytes: 2147483648 # 2 GB typical container budget
+  maxConcurrentTasks: 20000 # Lower than bare-metal/cloud VM default
+
+constraints:
+  - type: "storage"
+    severity: "warning"
+    message: "Container filesystems may be ephemeral - persist durable state outside the container"
+    code: "EPHEMERAL_STORAGE"
+  - type: "network"
+    severity: "info"
+    message: "Container networking depends on orchestrator/service mesh configuration"
+    code: "CONTAINER_NETWORK"

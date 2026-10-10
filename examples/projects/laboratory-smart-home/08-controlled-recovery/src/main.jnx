@@ -1,0 +1,291 @@
+// Laboratorium Junexis — Dom 8: kontrolowany powrót salonu.
+// Powrót źródła, walidacja danych i przywrócenie sterowania są osobnymi krokami.
+
+struct HomeSignal {
+    kind: Text
+    room: Text
+    air_quality: Float
+    source_status: Text
+    silence_age_ms: Int
+    silence_timeout_ms: Int
+    observed_at: Time
+}
+
+struct RecoveryAssessment {
+    recovery_mode: Text
+    recovery_phase: Text
+    fresh_evidence: Int
+    required_evidence: Int
+    approved: Bool
+    allow_control: Bool
+    recovery_revision: Int
+}
+
+struct HomeDecision {
+    room: Text
+    air_quality: Float
+    outcome: Text
+    reason: Text
+    source_status: Text
+    recovery_mode: Text
+    recovery_phase: Text
+    fresh_evidence: Int
+    required_evidence: Int
+    approved: Bool
+    recovery_revision: Int
+}
+
+struct VentilationCommand {
+    room: Text
+    air_quality: Float
+    decision: Text
+    requested_enabled: Bool
+    execution_mode: Text
+    cause: Text
+    source_status: Text
+    recovery_mode: Text
+    recovery_phase: Text
+    fresh_evidence: Int
+    required_evidence: Int
+    approved: Bool
+    recovery_revision: Int
+}
+
+struct VentilationConfirmation {
+    room: Text
+    air_quality: Float
+    decision: Text
+    requested_enabled: Bool
+    actual_enabled: Bool
+    status: Text
+    cause: Text
+    source_status: Text
+    recovery_mode: Text
+    recovery_phase: Text
+    fresh_evidence: Int
+    required_evidence: Int
+    approved: Bool
+    recovery_revision: Int
+    confirmed_at: Time
+}
+
+extern laboratory HomeRecovery {
+    target server
+    language go
+    file "user/server/home_recovery.go"
+
+    fn salon_available() -> Bool
+    fn record_salon(observed_at: Time, air_quality: Float)
+    fn health() -> HomeSignal
+    fn assess(signal: HomeSignal) -> RecoveryAssessment
+    fn publish(confirmation: VentilationConfirmation)
+}
+
+extern task HomeRecovery_salon_available() @server -> Bool
+extern task HomeRecovery_record_salon(observed_at: Time, air_quality: Float) @server
+extern task HomeRecovery_health() @server -> HomeSignal
+extern task HomeRecovery_assess(signal: HomeSignal) @server -> RecoveryAssessment
+extern task HomeRecovery_publish(confirmation: VentilationConfirmation) @server
+
+task RoomSensors() @server -> chan<HomeSignal> {
+    state step: Int = 0
+
+    every 1s {
+        step = step + 1
+        if step == 1 {
+            if HomeRecovery_salon_available() {
+                var salon_value: Float = 1250.0
+                let salon_time = now()
+                HomeRecovery_record_salon(salon_time, salon_value)
+                send HomeSignal {
+                    kind: "reading", room: "salon", air_quality: salon_value,
+                    source_status: "online", silence_age_ms: 0,
+                    silence_timeout_ms: 4500, observed_at: salon_time
+                }
+            }
+        }
+        if step == 2 {
+            send HomeSignal {
+                kind: "reading", room: "kuchnia", air_quality: 780.0,
+                source_status: "online", silence_age_ms: 0,
+                silence_timeout_ms: 4500, observed_at: now()
+            }
+        }
+        if step == 3 {
+            send HomeSignal {
+                kind: "reading", room: "sypialnia", air_quality: 920.0,
+                source_status: "online", silence_age_ms: 0,
+                silence_timeout_ms: 4500, observed_at: now()
+            }
+            step = 0
+        }
+    }
+}
+
+task SilenceMonitor() @server -> chan<HomeSignal> {
+    every 1s {
+        send HomeRecovery_health()
+    }
+}
+
+task HomeSignalMerge(readings: chan<HomeSignal>, health: chan<HomeSignal>) @server -> chan<HomeSignal> {
+    loop {
+        send recv readings
+        send recv health
+    }
+}
+
+task HomeDecisionEngine(signals: chan<HomeSignal>) @server -> chan<HomeDecision> {
+    config { air_quality_threshold: Float : 1000.0 }
+
+    loop {
+        let signal = recv signals
+        let recovery = HomeRecovery_assess(signal)
+
+        if signal.kind == "reading" and recovery.allow_control and signal.air_quality <= config.air_quality_threshold {
+            send HomeDecision {
+                room: signal.room, air_quality: signal.air_quality, outcome: "observe",
+                reason: "świeży pomiar nie przekracza progu", source_status: signal.source_status,
+                recovery_mode: recovery.recovery_mode, recovery_phase: recovery.recovery_phase,
+                fresh_evidence: recovery.fresh_evidence, required_evidence: recovery.required_evidence,
+                approved: recovery.approved, recovery_revision: recovery.recovery_revision
+            }
+        }
+        if signal.kind == "reading" and recovery.allow_control and signal.air_quality > config.air_quality_threshold {
+            send HomeDecision {
+                room: signal.room, air_quality: signal.air_quality, outcome: "enable-ventilation",
+                reason: "świeży pomiar przekracza próg", source_status: signal.source_status,
+                recovery_mode: recovery.recovery_mode, recovery_phase: recovery.recovery_phase,
+                fresh_evidence: recovery.fresh_evidence, required_evidence: recovery.required_evidence,
+                approved: recovery.approved, recovery_revision: recovery.recovery_revision
+            }
+        }
+        if signal.kind == "reading" and signal.room == "salon" and not recovery.allow_control {
+            send HomeDecision {
+                room: signal.room, air_quality: signal.air_quality, outcome: "hold-recovery-validation",
+                reason: "źródło wróciło, ale warunki recovery nie są jeszcze spełnione",
+                source_status: signal.source_status, recovery_mode: recovery.recovery_mode,
+                recovery_phase: recovery.recovery_phase, fresh_evidence: recovery.fresh_evidence,
+                required_evidence: recovery.required_evidence, approved: recovery.approved,
+                recovery_revision: recovery.recovery_revision
+            }
+        }
+        if signal.kind == "source-health" and signal.source_status == "silent" {
+            send HomeDecision {
+                room: signal.room, air_quality: signal.air_quality, outcome: "hold-source-silent",
+                reason: "nie nadszedł pomiar przed upływem limitu ciszy",
+                source_status: signal.source_status, recovery_mode: recovery.recovery_mode,
+                recovery_phase: recovery.recovery_phase, fresh_evidence: recovery.fresh_evidence,
+                required_evidence: recovery.required_evidence, approved: recovery.approved,
+                recovery_revision: recovery.recovery_revision
+            }
+        }
+    }
+}
+
+task VentilationController(decisions: chan<HomeDecision>) @server -> chan<VentilationCommand> {
+    loop {
+        let decision = recv decisions
+        if decision.outcome == "observe" {
+            send VentilationCommand {
+                room: decision.room, air_quality: decision.air_quality, decision: decision.outcome,
+                requested_enabled: false, execution_mode: "applied", cause: decision.reason,
+                source_status: decision.source_status, recovery_mode: decision.recovery_mode,
+                recovery_phase: decision.recovery_phase, fresh_evidence: decision.fresh_evidence,
+                required_evidence: decision.required_evidence, approved: decision.approved,
+                recovery_revision: decision.recovery_revision
+            }
+        }
+        if decision.outcome == "enable-ventilation" {
+            send VentilationCommand {
+                room: decision.room, air_quality: decision.air_quality, decision: decision.outcome,
+                requested_enabled: true, execution_mode: "applied", cause: decision.reason,
+                source_status: decision.source_status, recovery_mode: decision.recovery_mode,
+                recovery_phase: decision.recovery_phase, fresh_evidence: decision.fresh_evidence,
+                required_evidence: decision.required_evidence, approved: decision.approved,
+                recovery_revision: decision.recovery_revision
+            }
+        }
+        if decision.outcome == "hold-source-silent" {
+            send VentilationCommand {
+                room: decision.room, air_quality: decision.air_quality, decision: decision.outcome,
+                requested_enabled: false, execution_mode: "limited-source-silent", cause: decision.reason,
+                source_status: decision.source_status, recovery_mode: decision.recovery_mode,
+                recovery_phase: decision.recovery_phase, fresh_evidence: decision.fresh_evidence,
+                required_evidence: decision.required_evidence, approved: decision.approved,
+                recovery_revision: decision.recovery_revision
+            }
+        }
+        if decision.outcome == "hold-recovery-validation" {
+            send VentilationCommand {
+                room: decision.room, air_quality: decision.air_quality, decision: decision.outcome,
+                requested_enabled: false, execution_mode: "held-recovery-validation", cause: decision.reason,
+                source_status: decision.source_status, recovery_mode: decision.recovery_mode,
+                recovery_phase: decision.recovery_phase, fresh_evidence: decision.fresh_evidence,
+                required_evidence: decision.required_evidence, approved: decision.approved,
+                recovery_revision: decision.recovery_revision
+            }
+        }
+    }
+}
+
+task VentilationActuator(commands: chan<VentilationCommand>) @server -> chan<VentilationConfirmation> {
+    state living_room_enabled: Bool = false
+    state kitchen_enabled: Bool = false
+    state bedroom_enabled: Bool = false
+
+    loop {
+        let command = recv commands
+        if command.execution_mode == "applied" and command.room == "salon" { living_room_enabled = command.requested_enabled }
+        if command.execution_mode == "applied" and command.room == "kuchnia" { kitchen_enabled = command.requested_enabled }
+        if command.execution_mode == "applied" and command.room == "sypialnia" { bedroom_enabled = command.requested_enabled }
+
+        if command.room == "salon" {
+            send VentilationConfirmation {
+                room: command.room, air_quality: command.air_quality, decision: command.decision,
+                requested_enabled: command.requested_enabled, actual_enabled: living_room_enabled,
+                status: command.execution_mode, cause: command.cause, source_status: command.source_status,
+                recovery_mode: command.recovery_mode, recovery_phase: command.recovery_phase,
+                fresh_evidence: command.fresh_evidence, required_evidence: command.required_evidence,
+                approved: command.approved, recovery_revision: command.recovery_revision, confirmed_at: now()
+            }
+        }
+        if command.room == "kuchnia" {
+            send VentilationConfirmation {
+                room: command.room, air_quality: command.air_quality, decision: command.decision,
+                requested_enabled: command.requested_enabled, actual_enabled: kitchen_enabled,
+                status: command.execution_mode, cause: command.cause, source_status: command.source_status,
+                recovery_mode: command.recovery_mode, recovery_phase: command.recovery_phase,
+                fresh_evidence: command.fresh_evidence, required_evidence: command.required_evidence,
+                approved: command.approved, recovery_revision: command.recovery_revision, confirmed_at: now()
+            }
+        }
+        if command.room == "sypialnia" {
+            send VentilationConfirmation {
+                room: command.room, air_quality: command.air_quality, decision: command.decision,
+                requested_enabled: command.requested_enabled, actual_enabled: bedroom_enabled,
+                status: command.execution_mode, cause: command.cause, source_status: command.source_status,
+                recovery_mode: command.recovery_mode, recovery_phase: command.recovery_phase,
+                fresh_evidence: command.fresh_evidence, required_evidence: command.required_evidence,
+                approved: command.approved, recovery_revision: command.recovery_revision, confirmed_at: now()
+            }
+        }
+    }
+}
+
+task RecoveryProjection(confirmations: chan<VentilationConfirmation>) @server {
+    for confirmation in confirmations {
+        HomeRecovery_publish(confirmation)
+        log("RECOVERY pokoj={confirmation.room} faza={confirmation.recovery_phase} dowody={confirmation.fresh_evidence}/{confirmation.required_evidence} wykonanie={confirmation.status} stan={confirmation.actual_enabled}")
+    }
+}
+
+pipeline ControlledRecoveryFlow {
+    use RoomSensors -> HomeSignalMerge
+    use SilenceMonitor -> HomeSignalMerge
+    use HomeSignalMerge -> HomeDecisionEngine
+    use HomeDecisionEngine -> VentilationController
+    use VentilationController -> VentilationActuator
+    use VentilationActuator -> RecoveryProjection
+}
+

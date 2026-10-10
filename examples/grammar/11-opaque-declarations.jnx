@@ -1,0 +1,135 @@
+// grammar/11-opaque-declarations.jnx
+// Pokrycie: narrativeDeclaration (STRING_LITERAL i IDENTIFIER jako nazwa),
+//           deploymentDeclaration (anonimowy i z nazwą),
+//           supervisorDeclaration, quirksDeclaration,
+//           circuitBreakerDeclaration
+// Wszystkie te deklaracje mają "opaque body" — parser zbiera
+// balanced braces bez analizowania zawartości.
+
+// ─── narrative z STRING_LITERAL jako nazwą ────────────────────────────
+narrative "Temperature Monitoring" {
+    intent "Collect and analyze temperature data from IoT sensors"
+    stakeholders ["ops-team", "data-science"]
+    compliance "ISO-9001"
+    trace full
+    applies_to { TempPipeline }
+}
+
+// ─── narrative z IDENTIFIER jako nazwą ───────────────────────────────
+narrative TempNarrative {
+    intent "Real-time alerting for critical thresholds"
+    value_proposition "Reduce MTTD for thermal incidents"
+    applies_to { TempSensor, TempProcessor }
+    degraded_semantics {
+        if TempSensor.unavailable {
+            last_known_value_ttl: 5m
+        }
+    }
+}
+
+// ─── narrative z zagnieżdżonymi klamrami ──────────────────────────────
+narrative "Complex Narrative" {
+    story_flow {
+        step "collect" { source: sensor }
+        step "process" { filter: threshold { min: 10.0, max: 50.0 } }
+        step "report"  { channel: dashboard }
+    }
+}
+
+// ─── deployment anonimowy ─────────────────────────────────────────────
+deployment {
+    target embedded { device: kitchen_sensor }
+    target server   { replicas: 2, region: "eu-west" }
+    target report   { host: "dashboard.local" }
+}
+
+// ─── deployment z STRING_LITERAL jako nazwą ───────────────────────────
+deployment "Production" {
+    target embedded {
+        devices: [kitchen_sensor, bedroom_sensor]
+        firmware: "v1.2.0"
+    }
+    target server {
+        replicas: 3
+        memory: 512MB
+        cpu:    2
+    }
+}
+
+// ─── deployment z IDENTIFIER jako nazwą ──────────────────────────────
+deployment Staging {
+    target server {
+        replicas: 1
+        env: "staging"
+    }
+}
+
+// ─── supervisor ───────────────────────────────────────────────────────
+supervisor TempSupervisor {
+    strategy one_for_one
+    max_restarts 3
+    within 60s
+    children [
+        TempSensor,
+        TempProcessor,
+        AlertDashboard
+    ]
+}
+
+// ─── supervisor z zagnieżdżoną konfiguracją ───────────────────────────
+supervisor SystemSupervisor {
+    strategy rest_for_one
+    children {
+        worker TempSensor    { restart: permanent }
+        worker TempProcessor { restart: transient, max: 5 }
+        worker Dashboard     { restart: temporary }
+    }
+}
+
+// ─── quirks z STRING_LITERAL jako nazwą ───────────────────────────────
+quirks "esp32c3-usb-serial-bug" {
+    platform: "@embedded(esp32c3)"
+    description: "USB-Serial bridge requires UART0 workaround"
+    workaround: code {
+        Serial.setTxBufferSize(512);
+        Serial.begin(115200, SERIAL_8N1, RX_PIN, TX_PIN);
+    }
+}
+
+// ─── quirks z IDENTIFIER jako nazwą ──────────────────────────────────
+quirks rp2040NoEeprom {
+    platform: "@embedded(rp2040)"
+    description: "RP2040 lacks EEPROM — use Flash emulation"
+    workaround: code {
+        #include <EEPROM.h>
+        EEPROM.begin(512);
+    }
+}
+
+// ─── quirks z zagnieżdżonymi klamrami ─────────────────────────────────
+quirks "stm32-flash-ambiguity" {
+    affected_variants: ["stm32f103c8t6", "stm32f103cbt6"]
+    validation: code {
+        #if defined(STM32F103xB)
+            static_assert(FLASHEND >= 0x1FFFF, "wrong flash size");
+        #endif
+    }
+}
+
+// ─── circuit_breaker ──────────────────────────────────────────────────
+circuit_breaker TempSensorBreaker {
+    failure_threshold: 5
+    success_threshold: 2
+    open_duration:     10s
+    protects:          [TempSensor]
+}
+
+// ─── circuit_breaker z fallback ───────────────────────────────────────
+circuit_breaker ApiBreaker {
+    failure_threshold: 3
+    open_duration: 30s
+    fallback: CachedResponse
+    on_open { log("circuit open") }
+    on_half_open { log("testing...") }
+    on_close { log("recovered") }
+}

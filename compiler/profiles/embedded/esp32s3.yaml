@@ -1,0 +1,43 @@
+# ESP32-S3 Platform Profile
+# Dual-core Xtensa microcontroller with WiFi and BLE
+# Phase 27.5 - YAML-based platform profiles
+
+version: "1.0"
+platform: "@embedded"
+variant: "esp32s3"
+
+capabilities:
+  threading: true # Dual-core (FreeRTOS multi-threading)
+  fileIO: false # No file system by default
+  networking: true # WiFi 802.11 b/g/n + BLE 5.0
+  async: false # No async/await on embedded
+  dynamicAllocation: true # Heap available
+  realTimeClock: true # RTC peripheral
+  hardwareInterrupts: true # GPIO interrupts
+
+limits:
+  maxMemoryBytes: 524288 # 512 KB SRAM
+  maxConcurrentTasks: 32 # FreeRTOS tasks (dual-core)
+
+metadata:
+  description: "ESP32-S3 dual-core Xtensa microcontroller (WiFi, BLE)"
+  manufacturer: "Espressif Systems"
+  architecture: "Xtensa LX7"
+  frequency: "240MHz"
+  releaseYear: 2021
+
+hardware:
+  ram: "512 KB SRAM"
+  flash: "8 MB (external)"
+  wifi: "802.11 b/g/n"
+  bluetooth: "BLE 5.0"
+
+recommended:
+  useCases:
+    - "High-performance IoT devices"
+    - "Audio/video streaming"
+    - "Machine learning inference (TinyML)"
+    - "Multi-sensor data acquisition"
+  notRecommended:
+    - "Battery-critical applications (higher power consumption)"
+    - "Cost-sensitive projects (more expensive than ESP32-C3)"

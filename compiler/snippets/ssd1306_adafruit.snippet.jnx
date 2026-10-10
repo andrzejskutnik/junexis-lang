@@ -1,0 +1,138 @@
+// ================================================================================
+//  JUNEXIS SNIPPET: SSD1306 OLED Display 128x64 (Adafruit)
+// ================================================================================
+//
+//  Name:        ssd1306_adafruit
+//  Description: Adafruit SSD1306 library for 128x64 OLED display via I2C
+//  Author:      Junexis Team
+//  Version:     1.0.0
+//  Created:     2025-11-06
+//  Tags:        display, oled, ssd1306, adafruit, i2c, esp32, arduino
+//
+//  Library:     Adafruit SSD1306 + Adafruit GFX
+//  Datasheet:   https://www.adafruit.com/product/326
+//  Tutorial:    https://learn.adafruit.com/monochrome-oled-breakouts
+//
+//  Compatible Platforms:
+//    - ESP32 (all variants: C3, S3, WROOM, etc.)
+//    - Arduino (Uno, Mega, Nano, etc.)
+//    - STM32
+//    - Raspberry Pi Pico
+//
+//  Parameters:
+//    - i2c_address: I2C address (default: 0x3C, alternative: 0x3D)
+//    - screen_width: Display width in pixels (default: 128)
+//    - screen_height: Display height in pixels (default: 64)
+//
+//  Usage Example:
+//    device sensor_kitchen @embedded(esp32c3) {
+//      reference {
+//        @c/c++ {
+//          import: "ssd1306_adafruit"
+//        }
+//      }
+//      hardware {
+//        oled_address: u8 : 0x3C  // Override default address
+//      }
+//    }
+//
+//  Generated C++ Code:
+//    #include <Adafruit_SSD1306.h>
+//    #include <Adafruit_GFX.h>
+//    Adafruit_SSD1306 display(128, 64, &Wire, -1);
+//    display.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+//
+// ================================================================================
+
+snippet ssd1306_adafruit {
+  name: "SSD1306 OLED Display 128x64 (Adafruit)"
+  description: "Adafruit SSD1306 library for 128x64 OLED display via I2C"
+  author: "Junexis Team"
+  version: "1.0.0"
+  tags: ["display", "oled", "ssd1306", "adafruit", "i2c"]
+  
+  // Configurable parameters (with defaults)
+  parameters {
+    i2c_address: u8 : 0x3C       // I2C address (0x3C or 0x3D)
+    screen_width: u16 : 128      // Display width (128 pixels)
+    screen_height: u16 : 64      // Display height (64 pixels, or 32 for smaller variant)
+  }
+}
+
+// ===== DEVICE REFERENCE TEMPLATE =====
+device ssd1306_adafruit_template @embedded {
+  reference {
+    // ----- C/C++ (Arduino/ESP-IDF) -----
+    @c/c++ "SSD1306 OLED Display" {
+      library: "adafruit/Adafruit SSD1306@^2.5.10";
+      library: "adafruit/Adafruit GFX Library@^1.11.9";
+      include: {
+        <Adafruit_SSD1306.h>;
+        <Adafruit_GFX.h>;
+        <Wire.h>;
+      }
+      declare: Adafruit_SSD1306 display({hardware.screen_width}, {hardware.screen_height}, &Wire, -1);
+      // Initialization: Use on_start hook: display.begin(SSD1306_SWITCHCAPVCC, {device.hardware.i2c_address}); display.clearDisplay(); display.display();
+    }
+    
+    // ----- MicroPython (ESP32/Raspberry Pi Pico) -----
+    @micropython "SSD1306 via ssd1306 library" {
+      import: {
+        from machine import Pin, I2C;
+        import ssd1306;
+      }
+      declare: {
+        i2c = I2C(0, scl=Pin(22), sda=Pin(21));
+        display = ssd1306.SSD1306_I2C({hardware.screen_width}, {hardware.screen_height}, i2c, addr={hardware.i2c_address});
+      }
+      // Initialization: Use on_start hook: display.fill(0); display.show()
+    }
+    
+    // ----- Rust (embedded-hal) -----
+    @rust "SSD1306 via ssd1306 crate" {
+      declare: {
+        use ssd1306::{prelude::*, I2CDisplayInterface, Ssd1306};
+        use embedded_graphics::{pixelcolor::BinaryColor, prelude::*};
+        let interface = I2CDisplayInterface::new(i2c);
+        let mut display = Ssd1306::new(interface, DisplaySize128x64, DisplayRotation::Rotate0).into_buffered_graphics_mode();
+      }
+      // Initialization: Use on_start hook: display.init().unwrap(); display.clear(BinaryColor::Off).unwrap();
+    }
+  }
+}
+
+// ===== ADDITIONAL METADATA =====
+// Display specifications:
+//   - Resolution: 128x64 pixels (or 128x32 for smaller variant)
+//   - Color: Monochrome (1-bit per pixel)
+//   - Interface: I2C (address: 0x3C or 0x3D)
+//   - Voltage: 3.3V (5V tolerant on some breakouts)
+//
+// I2C Wiring:
+//   - VCC → 3.3V (or 5V if supported)
+//   - GND → Ground
+//   - SCL → I2C Clock (ESP32: GPIO 22, Arduino Uno: A5)
+//   - SDA → I2C Data (ESP32: GPIO 21, Arduino Uno: A4)
+//
+// I2C Address Detection:
+//   - Common: 0x3C (default for most modules)
+//   - Alternative: 0x3D (if address pin is high)
+//   - Use I2C scanner sketch to detect actual address
+//
+// Display Operations:
+//   - display.clearDisplay() - Clear buffer
+//   - display.setTextSize(1) - Set text size (1-4)
+//   - display.setTextColor(SSD1306_WHITE) - Set text color
+//   - display.setCursor(x, y) - Set cursor position
+//   - display.println("Text") - Print text
+//   - display.display() - Update screen (must call after drawing!)
+//
+// Performance:
+//   - I2C Speed: 100 kHz (standard) or 400 kHz (fast mode)
+//   - Frame Rate: ~20-30 FPS (full screen update)
+//   - Power: ~20 mA active, ~10 µA sleep
+//
+// Common Issues:
+//   - Black screen → Check I2C address (0x3C vs 0x3D)
+//   - Nothing updates → Missing display.display() call
+//   - Flickering → Reduce update frequency or use partial updates

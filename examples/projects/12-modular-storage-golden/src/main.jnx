@@ -1,0 +1,22 @@
+import domain::observations
+import storage::home_store
+import application::home_service
+import dashboard::home_panel
+
+protocol rest {
+    POST("/api/home/observations", SaveHomeObservation(body observation: HomeObservation))
+    GET("/api/home/{room}", ReadHomeSnapshot(path room: Text))
+    GET("/api/home/storage/health", CheckHomeStorage())
+    POST("/api/home/storage/rollback", VerifyHomeRollback(body observation: HomeObservation))
+}
+
+pipeline ModularStorageHome {
+    use PublishHomeSnapshot -> HomeStoragePanel
+}
+
+narrative "Modular storage golden path" {
+    intent "Persist a home observation, restart the server and let the report receive restored data through a server task."
+    stakeholders ["learner", "developer", "operator"]
+    trace sampled(rate: 100%)
+    applies_to { SaveHomeObservation, ReadHomeSnapshot, PublishHomeSnapshot, HomeStoragePanel }
+}

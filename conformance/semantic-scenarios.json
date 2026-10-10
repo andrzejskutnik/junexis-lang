@@ -1,0 +1,206 @@
+{
+  "schemaVersion": "junexis.semantic-conformance-ledger/0.1",
+  "semanticContract": "junexis.semantic-runtime/0.1",
+  "targetLevel": "S3",
+  "scenarios": [
+    {
+      "id": "values.scalar-expressions-control-flow",
+      "construct": "scalar/control-flow",
+      "semantics": {
+        "values": ["Int", "Float", "Text", "Bool"],
+        "expressions": ["arithmetic", "comparison", "logical"],
+        "controlFlow": ["if", "else-if", "else"]
+      },
+      "backendEvidence": [
+        {
+          "backend": "cpp",
+          "level": "S2",
+          "test": "GeneratedScalarControlFlow_IsEquivalentAcrossCppGoAndTypeScriptAsync"
+        },
+        {
+          "backend": "go",
+          "level": "S2",
+          "test": "GeneratedScalarControlFlow_IsEquivalentAcrossCppGoAndTypeScriptAsync"
+        },
+        {
+          "backend": "typescript",
+          "level": "S2",
+          "test": "GeneratedScalarControlFlow_IsEquivalentAcrossCppGoAndTypeScriptAsync"
+        }
+      ],
+      "equivalenceEvidence": {
+        "level": "S3",
+        "test": "GeneratedScalarControlFlow_IsEquivalentAcrossCppGoAndTypeScriptAsync",
+        "normalForm": "canonical-json"
+      }
+    },
+    {
+      "id": "runtime.task-lifecycle-state-time",
+      "construct": "task/state/every",
+      "semantics": {
+        "contract": "junexis.task-lifecycle/0.1",
+        "initialization": "once-per-task-instance",
+        "state": "persists-between-invocations",
+        "firstTick": "after-interval",
+        "cancellation": "between-completed-ticks",
+        "time": "duration-milliseconds-no-wall-clock-accuracy"
+      },
+      "backendEvidence": [
+        {
+          "backend": "cpp",
+          "level": "S2",
+          "test": "GeneratedLifecycleStateAndTime_IsEquivalentAcrossCppGoAndTypeScriptAsync"
+        },
+        {
+          "backend": "go",
+          "level": "S2",
+          "test": "GeneratedLifecycleStateAndTime_IsEquivalentAcrossCppGoAndTypeScriptAsync"
+        },
+        {
+          "backend": "typescript",
+          "level": "S2",
+          "test": "GeneratedLifecycleStateAndTime_IsEquivalentAcrossCppGoAndTypeScriptAsync"
+        }
+      ],
+      "equivalenceEvidence": {
+        "level": "S3",
+        "test": "GeneratedLifecycleStateAndTime_IsEquivalentAcrossCppGoAndTypeScriptAsync",
+        "normalForm": "canonical-json"
+      }
+    },
+    {
+      "id": "communication.chan.fifo-backpressure",
+      "construct": "chan<T>",
+      "semantics": {
+        "delivery": "Backpressured",
+        "backpressure": "ProducerWaits",
+        "retention": "UntilConsumed",
+        "ordering": "Fifo"
+      },
+      "backendEvidence": [
+        {
+          "backend": "cpp",
+          "level": "S2",
+          "test": "GeneratedCppRuntime_ConformsToJunexis02CommunicationContractAsync"
+        },
+        {
+          "backend": "go",
+          "level": "S2",
+          "test": "GeneratedGoRuntime_ConformsToJunexis02CommunicationContractAsync"
+        },
+        {
+          "backend": "typescript",
+          "level": "S2",
+          "test": "GeneratedChan_IsEquivalentAcrossCppGoAndTypeScriptAsync"
+        }
+      ],
+      "equivalenceEvidence": {
+        "level": "S3",
+        "test": "GeneratedChan_IsEquivalentAcrossCppGoAndTypeScriptAsync",
+        "normalForm": "canonical-json"
+      }
+    },
+    {
+      "id": "communication.queue.at-least-once-ack",
+      "construct": "queue<T>",
+      "semantics": {
+        "delivery": "AtLeastOnce",
+        "backpressure": "ProducerContinues",
+        "retention": "UntilAck",
+        "ordering": "Fifo",
+        "messageId": "stable-until-ack",
+        "nack": "retain-for-redelivery",
+        "invalidAck": "no-effect"
+      },
+      "backendEvidence": [
+        {
+          "backend": "cpp",
+          "level": "S2",
+          "test": "GeneratedCppRuntime_ConformsToJunexis02CommunicationContractAsync"
+        },
+        {
+          "backend": "go",
+          "level": "S2",
+          "test": "GeneratedGoRuntime_ConformsToJunexis02CommunicationContractAsync"
+        },
+        {
+          "backend": "typescript",
+          "level": "S2",
+          "test": "GeneratedTypeScriptRuntime_ConformsToJunexis02CommunicationContractAsync"
+        }
+      ],
+      "equivalenceEvidence": {
+        "level": "S3",
+        "test": "GeneratedQueueAckNack_IsEquivalentAcrossCppGoAndTypeScriptAsync",
+        "normalForm": "canonical-json"
+      }
+    },
+    {
+      "id": "communication.stream.latest-wins",
+      "construct": "stream<T>",
+      "semantics": {
+        "delivery": "LatestWins",
+        "backpressure": "ProducerContinues",
+        "retention": "LatestOnly",
+        "ordering": "LatestOnly",
+        "fanout": "independent-subscribers",
+        "historyReplay": "none",
+        "duplicatePoll": "none"
+      },
+      "backendEvidence": [
+        {
+          "backend": "cpp",
+          "level": "S2",
+          "test": "GeneratedCppRuntime_ConformsToJunexis02CommunicationContractAsync"
+        },
+        {
+          "backend": "go",
+          "level": "S2",
+          "test": "GeneratedGoRuntime_ConformsToJunexis02CommunicationContractAsync"
+        },
+        {
+          "backend": "typescript",
+          "level": "S2",
+          "test": "GeneratedTypeScriptRuntime_ConformsToJunexis02CommunicationContractAsync"
+        }
+      ],
+      "equivalenceEvidence": {
+        "level": "S3",
+        "test": "GeneratedStreamLatestWinsFanout_IsEquivalentAcrossCppGoAndTypeScriptAsync",
+        "normalForm": "canonical-json"
+      }
+    },
+    {
+      "id": "boundary.extern-wire.server-report",
+      "construct": "extern/wire-boundary",
+      "targetLevel": "S4",
+      "semantics": {
+        "extern": "typed-injected-source-target",
+        "sourceTarget": "server",
+        "targetTarget": "report",
+        "wireVersion": "junexis-wire/0.2",
+        "encoding": "json",
+        "unknownVersion": "reject"
+      },
+      "targetEvidence": [
+        {
+          "target": "server",
+          "backend": "go",
+          "level": "S2",
+          "test": "TypedExtern_CrossesServerReportBoundaryThroughVersionedWireContractAsync"
+        },
+        {
+          "target": "report",
+          "backend": "typescript",
+          "level": "S2",
+          "test": "TypedExtern_CrossesServerReportBoundaryThroughVersionedWireContractAsync"
+        }
+      ],
+      "distributedEvidence": {
+        "level": "S4",
+        "test": "TypedExtern_CrossesServerReportBoundaryThroughVersionedWireContractAsync",
+        "normalForm": "canonical-json"
+      }
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+// Prosty przykład czujnika na urządzeniu embedded w JunexisLang
+// Demonstruje minimalne zadanie embedded z wysyłaniem danych
+
+struct DaneCzujnika {
+    temperatura: f32,
+    wilgotnosc: f32,
+    znacznik_czasu: u64
+}
+
+// Zadanie czujnika działające na ESP32-C3
+task ZadanieCzujnika() @embedded(esp32c3) -> chan<DaneCzujnika> {
+    config {
+        pin_czujnika: u8 : 4,
+        interwal_odczytu: u32 : 5000
+    }
+
+    every 5s {
+        // Odczyt z czujnika DHT22
+        var dane = DaneCzujnika {
+            temperatura: 22.5,
+            wilgotnosc: 55.0,
+            znacznik_czasu: 0
+        };
+        send dane;
+    }
+}

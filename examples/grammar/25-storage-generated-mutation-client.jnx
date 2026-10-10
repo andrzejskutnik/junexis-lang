@@ -1,0 +1,29 @@
+// M14.9 — typowany klient Mutation Plan dla @server bez wyboru providera.
+storage HomeData {
+    entity Observation {
+        id: Uuid
+        homeId: Uuid
+        sensor: Text
+        value: Float
+        recordedAt: Time
+        key(id)
+    }
+
+    mutation AddObservation(
+        id: Uuid,
+        homeId: Uuid,
+        sensor: Text,
+        value: Float,
+        recordedAt: Time
+    ) insert single Observation {
+        set id = params.id
+        set homeId = params.homeId
+        set sensor = params.sensor
+        set value = params.value
+        set recordedAt = params.recordedAt
+    }
+}
+
+task HomeApi() @server {
+    log("storage mutation client ready")
+}

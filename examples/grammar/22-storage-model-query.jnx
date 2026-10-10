@@ -1,0 +1,19 @@
+// M13.2 — jawny model danych i przenośna operacja odczytu.
+storage HomeData {
+    entity Observation {
+        id: Uuid
+        homeId: Uuid
+        sensor: Text
+        value: Float
+        recordedAt: Time
+        note: Text | Null
+        key(id)
+    }
+
+    query RecentObservations(homeId: Uuid) from Observation {
+        filter homeId == params.homeId and value > 0.0
+        project sensor as sensorName, value, recordedAt
+        sort recordedAt desc
+        limit 20
+    }
+}

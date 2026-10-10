@@ -1,0 +1,4 @@
+name = "temperature-monitor"
+entry = "src/main.jnx"
+targets = ["embedded", "server", "report"]
+outDir = "out"

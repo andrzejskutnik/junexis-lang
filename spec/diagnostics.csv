@@ -1,0 +1,114 @@
+code,level,category,message,description,source_spec
+P0001,Error,Syntax,"syntax error: {message}","Błąd leksera lub parsera ANTLR; diagnostyka zawiera lokalizację 1-based.",02-lexical.md
+P0002,Error,Parser,"AST construction failed: {message}","Parser utworzył drzewo składniowe, ale ASTBuilder nie potrafił zbudować kompletnego AST.",STATUS.md
+R0001,Error,IR,"unsupported Structural IR element: {message}","AST zawiera element, którego Structural IR nie potrafi odwzorować bezstratnie.",STATUS.md
+R0002,Error,IR,"unexpected Structural IR transformation failure: {message}","Nieoczekiwany błąd transformacji AST do IR został przechwycony zamiast przerwać proces.",STATUS.md
+T0001,Warning,Topology,"logical pipeline cycle: {path}","Logiczna topologia zawiera cykl; ścieżka diagnostyki odpowiada rzeczywistym krawędziom grafu.",05-communication.md
+T0002,Error,Topology,"pipeline references unknown task: {task}","Endpoint pipeline wskazuje task, który nie istnieje w Structural IR.",04-declarations.md
+T0003,Info,Topology,"high logical fan-out: {count}","Task publikuje do co najmniej czterech unikalnych endpointów docelowych.",05-communication.md
+T0004,Info,Topology,"high logical fan-in: {count}","Task otrzymuje dane z co najmniej czterech unikalnych endpointów źródłowych.",05-communication.md
+T0005,Error,Topology,"unsupported pipeline connection: {kind}","Structural IR zawiera rodzaj połączenia, którego logiczny graf topologii nie obsługuje.",STATUS.md
+G0001,Error,CodeGen,"generated artifact contract failed [{platform}]: {message}","Generator nie utworzył kompletnego, bezpiecznego zestawu plików wymaganego przez kontrakt artefaktu M4.",STATUS.md
+G0002,Error,CodeGen,"unknown code generation target: '{target}'","CLI otrzymało nazwę backendu, dla której nie istnieje generator kodu.",STATUS.md
+B0001,Error,Build,"source or targets changed after analysis preflight; run the build again","Build z jawnym buildId został odrzucony, ponieważ źródło lub targety różnią się od zatwierdzonego preflightu.",12-cli-and-lsp.md
+B0002,Error,Build,"could not publish latest-build receipt atomically: {message}","Artefakty powstały, ale CLI nie mogło atomowo opublikować trwałego wskazania ostatniego udanego builda; komenda kończy się błędem i zachowuje poprzedni receipt.",12-cli-and-lsp.md
+B0003,Error,Build,"target '{target}' has no applicable task in the analyzed program","Jawnie wybrany target z CLI lub manifestu nie ma odpowiadającego zadania @embedded, @server ani @report; build zatrzymuje się zamiast publikować pusty lub mylący wynik.",12-cli-and-lsp.md
+B0006,Error,Build,"storage binding '{binding}' references unknown declaration '{declaration}'","Binding providera wskazuje deklarację storage, której nie ma w osiągalnym grafie modułów projektu.",31-independent-storage-runtime.md
+B0007,Error,Build,"storage declaration '{declaration}' has no project binding","Projekt włączył jawne pakiety providerów, ale jedna z deklaracji storage nie ma bindingu środowiska.",31-independent-storage-runtime.md
+CLI0001,Warning,CLI,"could not remove temporary analysis preflight snapshot: {message}","CLI nie mogło usunąć tymczasowego snapshotu preflight po buildzie; właściwe artefakty pozostają poprawne.",12-cli-and-lsp.md
+E0001,Error,General,"duplicate declaration: '{name}'","Wielokrotna deklaracja tego samego task/struct/enum/fn o tej samej nazwie w danym scope.",04-declarations.md
+E0002,Error,Import,"import name collision: '{name}' already in scope","Glob import wprowadza nazwę już istniejącą w scope. Rozwiązanie: selective lub aliased import.",04-declarations.md
+E0003,Error,Lexical,"reserved identifier prefix '__': '{name}'","Identyfikator zaczyna się od podwójnego podkreślenia (__), które jest zarezerwowane dla kompilatora.",02-lexical.md
+E0004,Error,Import,"imported module not found: '{module}'","Import wskazuje tożsamość modułu, której nie ma w skonfigurowanych source roots.",24-modules-and-sqlite.md
+E0005,Error,Import,"module import cycle: {path}","Graf modułów zawiera cykl; pierwsza wersja systemu modułów odrzuca wszystkie cykle.",24-modules-and-sqlite.md
+E0006,Error,Import,"import module case mismatch: '{actual}' should be '{expected}'","Pisownia importu różni się wielkością liter od kanonicznej tożsamości pliku i byłaby nieprzenośna.",24-modules-and-sqlite.md
+E0007,Error,Import,"imported symbol not found: '{symbol}' in module '{module}'","Import selective wskazuje symbol, którego moduł nie eksportuje.",24-modules-and-sqlite.md
+E0010,Error,ExternFFI,"extern implementation not found: '{name}'","Brak pliku natywnego implementującego extern task. Kompilator nie może wygenerować bridge.",04-declarations.md
+E0011,Error,ExternFFI,"extern signature mismatch: '{name}'","Sygnatura w pliku natywnym (typy parametrów lub zwracany) nie zgadza się z deklaracją extern task w .jnx.",04-declarations.md
+E0012,Error,Embedded,"recursive fn not allowed on embedded: '{name}'","Funkcja fn jest rekurencyjna lub wywołuje rekurencyjny łańcuch fn na platformie @embedded. Użyj @allow_recursion aby wyłączyć ograniczenie.",04-declarations.md
+E0013,Error,Lifecycle,"event '{event}' not applicable in this context","Identyfikator lifecycle hooka (on ...) nie jest zdarzeniem dostępnym dla danego tasku i platformy (np. on connect w tasku bez kanału wejściowego).",04-declarations.md
+E0014,Error,ExternFFI,"extern type cannot cross platform boundary: '{name}'","Wartość extern type próbuje być przesłana przez kanał między platformami. extern type może być przekazywany tylko między extern task na tej samej platformie.",04-declarations.md
+E0020,Warning,Semantic,"undeclared identifier: '{name}'","Wywołanie funkcji lub odwołanie do identyfikatora '{name}' nie ma odpowiadającej deklaracji w scope (task, fn, extern task). Dodaj deklarację lub extern task.",04-declarations.md
+E0021,Warning,Semantic,"unknown type: '{name}'","Odwołanie do typu '{name}' nie ma odpowiadającej deklaracji struct/enum/extern type w pliku. Dodaj deklarację lub sprawdź pisownię.",04-declarations.md
+W0022,Warning,Semantic,"field access on opaque type: '{expr}.{field}'","Dostęp do pola '{field}' na wartości '{expr}', której typ jest nieznany kompilatorowi (np. wynik undeclared extern). Dodaj deklarację zwracanego typu.",04-declarations.md
+E0023,Error,Semantic,"argument count mismatch for '{name}': expected {min}..{max}, got {actual}","Liczba argumentów wywołania nie mieści się w sygnaturze task, fn albo extern task; parametry z wartością domyślną są opcjonalne.",04-declarations.md
+E4203,Error,Communication,"chan<T> fanout requires explicit bridge","chan<T> ma więcej niż jednego odbiorcy (fanout). chan semantycznie jest point-to-point — wymagany jawny broadcast bridge.",05-communication.md
+E4210,Error,Communication,"queue<T> on @embedded requires storage_budget in config","queue<T> użyte w tasku na @embedded bez zadeklarowania storage_budget w sekcji config. Embedded wymaga jawnego budżetu pamięci dla kolejki.",05-communication.md
+E5001,Error,Platform,"task exceeds platform memory limit: {actual} > {limit}","Task wymaga więcej pamięci niż dopuszcza platforma docelowa (compile-time).",07-platform.md
+W5000,Warning,Platform,"platform '{platform}' has no capability profile","Walidacja profilu została pominięta dla eksperymentalnej lub nieobsługiwanej platformy; parser i dalsze etapy nie powinny z tego powodu ulec awarii.",07-platform.md
+E5003,Error,Platform,"platform '{platform}' does not support required feature: '{feature}'","Task wymaga cechy (WiFi, threading, file I/O) nieobsługiwanej przez wskazany wariant platformy.",07-platform.md
+E5004,Error,Platform,"runtime memory usage exceeds platform limit: {actual} > {limit}","Użycie pamięci przekroczyło limit platformy w trakcie wykonania (walidacja runtime, nie compile-time).",07-platform.md
+W4201,Warning,Communication,"stream<T> connected to zero-loss task — data loss possible","stream<T> może dropować wiadomości (latest-wins). Podłączony task oczekuje zero-loss delivery. Rozważ chan<T> lub queue<T>.",05-communication.md
+W4202,Warning,Communication,"queue<T> without explicit ACK/NACK handling","queue<T> użyte bez obsługi potwierdzenia. At-least-once semantics wymaga jawnego ACK/NACK.",05-communication.md
+W4211,Warning,Communication,"queue<T> without consumer — will escalate to error without offload","queue<T> nie ma zarejestrowanego konsumenta. Bez offload do @server lub storage_budget zostanie podwyższone do błędu.",05-communication.md
+W4212,Warning,Communication,"multiple queues on @embedded without memory limits","Wiele queue<T> na @embedded bez zadeklarowanych limitów. Ryzyko przepełnienia pamięci.",05-communication.md
+W5001,Warning,Platform,"gRPC + stream<T> fanout — gRPC has 1:1 semantics","stream<T> z gRPC przy wielu odbiorcach. gRPC bidirectional streaming ma semantykę 1:1 — fanout może nie działać zgodnie z oczekiwaniami.",08-protocols.md
+W5002,Warning,Platform,"memory usage >80% of platform limit: {actual} / {limit}","Task używa ponad 80% limitu pamięci platformy. Ostrzeżenie pojemności — nie błąd, ale ryzyko przy wzroście użycia.",07-platform.md
+W5008,Warning,Platform,"concurrent task count >80% of platform maximum","Liczba jednoczesnych tasków przekracza 80% maksimum dla platformy.",07-platform.md
+I4204,Info,Communication,"queue<T> connected across restart boundary — good practice","queue<T> spaja zadania przez granicę restartu. Dobra praktyka — queue gwarantuje at-least-once delivery przez crash/restart.",05-communication.md
+W6001,Warning,Protocol,"REST + queue<T> — polling overhead","REST jest protokołem request/response. Konsumowanie queue<T> przez REST wymaga pollingu po stronie klienta.",08-protocols.md
+I6002,Info,Protocol,"protocol auto-selected: '{protocol}' for '{source}' → '{target}'","Kompilator automatycznie dobrał protokół komunikacyjny dla połączenia między platformami. Informacyjny — nie wymaga akcji.",08-protocols.md
+D6001,Error,DistributedTopology,"protocol '{protocol}' references unknown task '{task}'","Binding protokołu wskazuje task, który nie istnieje w dokumencie.",08-protocols.md
+D6101,Error,DistributedTopology,"deployment '{deployment}' references unknown task '{task}'","Placement deploymentu wskazuje task, który nie istnieje w dokumencie.",07-platform.md
+D6102,Error,DistributedTopology,"deployment target '{target}' contains placement for platform '{platform}'","Task został umieszczony w bloku target niezgodnym z jego adnotacją platformy.",07-platform.md
+SQC001,Error,StorageQuery,"named query '{name}' can only be called from @server","Wywołanie named query ma wykonawczy lowering wyłącznie dla bootstrapowego targetu Go/@server.",51-storage-task-query-binding.md
+SQC002,Error,StorageQuery,"named query call cannot mix positional and named arguments","Jedno wywołanie używa wyłącznie argumentów pozycyjnych albo wyłącznie nazwanych.",51-storage-task-query-binding.md
+SQC003,Error,StorageQuery,"named query argument supplied more than once","Ta sama nazwa argumentu wystąpiła wielokrotnie.",51-storage-task-query-binding.md
+SQC004,Error,StorageQuery,"named query does not declare argument","Wywołanie zawiera nazwę spoza deklaracji query.",51-storage-task-query-binding.md
+SQC005,Error,StorageQuery,"named query argument type mismatch","Typ wartości wywołania nie odpowiada typowi parametru query.",51-storage-task-query-binding.md
+SQC006,Warning,StorageQuery,"module alias does not expose qualified named query calls","Użyj selective import modelu storage; alias całego modułu nie ma jeszcze składni wywołania query.",54-storage-query-developer-experience.md
+SMP001,Error,StorageMutation,"unsupported Mutation Plan version","Wersja Mutation Plan nie jest obsługiwana przez ten kompilator.",55-storage-mutation-plan-ir.md
+SMP002,Error,StorageMutation,"mutation references another logical model","Nazwa modelu w mutacji musi odpowiadać deklaracji storage.",55-storage-mutation-plan-ir.md
+SMP010,Error,StorageMutation,"duplicate mutation parameter","Parametr mutacji jest zadeklarowany więcej niż raz.",55-storage-mutation-plan-ir.md
+SMP020,Error,StorageMutation,"mutation references unknown entity","Encja docelowa nie istnieje w logicznym modelu storage.",55-storage-mutation-plan-ir.md
+SMP030,Error,StorageMutation,"insert requires Single cardinality","Insert zawsze tworzy jeden rekord.",55-storage-mutation-plan-ir.md
+SMP031,Error,StorageMutation,"insert cannot contain predicate","Insert nie wybiera istniejących rekordów.",55-storage-mutation-plan-ir.md
+SMP032,Error,StorageMutation,"delete cannot contain assignments","Delete usuwa rekordy i nie przypisuje ich pól.",55-storage-mutation-plan-ir.md
+SMP033,Error,StorageMutation,"insert or update requires assignment","Insert i Update wymagają co najmniej jednego set.",55-storage-mutation-plan-ir.md
+SMP034,Error,StorageMutation,"field assigned more than once","Jedno pole nie może otrzymać kilku wartości w tej samej mutacji.",55-storage-mutation-plan-ir.md
+SMP035,Error,StorageMutation,"assignment references unknown field","Set wskazuje pole spoza encji logicznej.",55-storage-mutation-plan-ir.md
+SMP036,Error,StorageMutation,"update changes primary key","Update nie może zmieniać tożsamości rekordu.",55-storage-mutation-plan-ir.md
+SMP037,Error,StorageMutation,"assignment type or nullability mismatch","Wartość set nie odpowiada typowi albo nullability pola.",55-storage-mutation-plan-ir.md
+SMP038,Error,StorageMutation,"insert omits required field","Insert musi przypisać każde pole non-nullable.",55-storage-mutation-plan-ir.md
+SMP040,Error,StorageMutation,"update or delete requires predicate","Update i Delete bez where są odrzucane.",55-storage-mutation-plan-ir.md
+SMP041,Error,StorageMutation,"Single mutation is not bound by complete key","Single wymaga równości wszystkich pól klucza z nie-nullable wejściem.",55-storage-mutation-plan-ir.md
+SMP050,Error,StorageMutation,"predicate compares incompatible types","Obie strony porównania where muszą mieć zgodne typy.",55-storage-mutation-plan-ir.md
+SMP051,Error,StorageMutation,"logical predicate requires at least two terms","Operator and/or wymaga co najmniej dwóch warunków.",55-storage-mutation-plan-ir.md
+SMP052,Error,StorageMutation,"assignment reads an entity field","M14.1 dopuszcza w set wyłącznie parametr albo literał.",55-storage-mutation-plan-ir.md
+SMP053,Error,StorageMutation,"predicate references unknown field","Where wskazuje pole spoza encji logicznej.",55-storage-mutation-plan-ir.md
+SMP054,Error,StorageMutation,"mutation references unknown parameter","Set albo where wskazuje niezadeklarowany parametr.",55-storage-mutation-plan-ir.md
+SMP070,Error,StorageMutation,"mutation parameter uses non-portable type","Typ parametru nie ma reprezentacji Storage ABI 0.1.",56-storage-mutation-source-projection.md
+SMP071,Error,StorageMutation,"unknown mutation kind","Structural IR zawiera nieobsługiwany rodzaj mutacji.",56-storage-mutation-source-projection.md
+SMP072,Error,StorageMutation,"where expression cannot be projected","Warunek where wykracza poza przenośny podzbiór Mutation Plan.",56-storage-mutation-source-projection.md
+SMP073,Error,StorageMutation,"where value cannot be projected","Wartość where nie jest polem, parametrem ani literałem.",56-storage-mutation-source-projection.md
+SMP074,Error,StorageMutation,"set value cannot be projected","Wartość set nie jest parametrem ani literałem.",56-storage-mutation-source-projection.md
+SMP075,Error,StorageMutation,"literal has no portable mutation representation","Literał nie ma kanonicznej reprezentacji Storage ABI 0.1.",56-storage-mutation-source-projection.md
+SMP080,Error,StorageMutation,"duplicate storage operation name","Query i mutation współdzielą jedną przestrzeń nazw operacji modelu.",56-storage-mutation-source-projection.md
+SMP097,Error,StorageMutation,"unknown mutation expression","Mutation Plan zawiera nieznany rodzaj wyrażenia.",55-storage-mutation-plan-ir.md
+SMP098,Error,StorageMutation,"unknown mutation predicate","Mutation Plan zawiera nieznany rodzaj predykatu.",55-storage-mutation-plan-ir.md
+SMP099,Error,StorageMutation,"unknown mutation operation","Mutation Plan zawiera nieznany rodzaj operacji.",55-storage-mutation-plan-ir.md
+SMR010,Error,StorageMutationRuntime,"missing mutation argument","Wywołanie nie dostarcza wszystkich zadeklarowanych parametrów.",57-storage-runtime-mutation-lowering.md
+SMR011,Error,StorageMutationRuntime,"duplicate mutation argument","Argument mutacji został przekazany więcej niż raz.",57-storage-runtime-mutation-lowering.md
+SMR012,Error,StorageMutationRuntime,"unknown mutation argument","Wywołanie dostarcza argument spoza deklaracji mutation.",57-storage-runtime-mutation-lowering.md
+SMR013,Error,StorageMutationRuntime,"mutation argument type mismatch","Typ argumentu nie odpowiada typowi parametru mutation.",57-storage-runtime-mutation-lowering.md
+SMR014,Error,StorageMutationRuntime,"non-nullable mutation argument is null","Null przekazano do parametru non-nullable.",57-storage-runtime-mutation-lowering.md
+SMR015,Error,StorageMutationRuntime,"invalid canonical mutation argument","Wartość argumentu nie ma poprawnej reprezentacji Storage ABI.",57-storage-runtime-mutation-lowering.md
+SMR020,Error,StorageMutationRuntime,"null literal requires null predicate","Null w predykacie musi mieć jawną semantykę null.",57-storage-runtime-mutation-lowering.md
+SMR021,Error,StorageMutationRuntime,"invalid canonical mutation literal","Literał mutacji nie ma poprawnej reprezentacji Storage ABI.",57-storage-runtime-mutation-lowering.md
+SMR030,Error,StorageMutationRuntime,"unsupported mutation result version","Provider zwrócił nieobsługiwaną wersję wyniku mutation.",57-storage-runtime-mutation-lowering.md
+SMR031,Error,StorageMutationRuntime,"negative affectedRows","Liczba zmienionych rekordów nie może być ujemna.",57-storage-runtime-mutation-lowering.md
+SMR032,Error,StorageMutationRuntime,"applied result has zero rows","Applied oznacza zmianę co najmniej jednego rekordu.",57-storage-runtime-mutation-lowering.md
+SMR033,Error,StorageMutationRuntime,"not-applied result has affected rows","Not-applied wymaga affectedRows równego zero.",57-storage-runtime-mutation-lowering.md
+SMR034,Error,StorageMutationRuntime,"unknown outcome returned as success","Nieznany skutek musi użyć klasy błędu unknown-outcome.",57-storage-runtime-mutation-lowering.md
+SMR035,Error,StorageMutationRuntime,"Single mutation affected multiple rows","Provider naruszył zadeklarowany zasięg Single.",57-storage-runtime-mutation-lowering.md
+SMR036,Error,StorageMutationRuntime,"insert result is not exactly one applied row","Pomyślny Insert musi utworzyć dokładnie jeden rekord.",57-storage-runtime-mutation-lowering.md
+SMR095,Error,StorageMutationRuntime,"unknown mutation comparison operator","Lowering otrzymał nieobsługiwany operator porównania.",57-storage-runtime-mutation-lowering.md
+SMR096,Error,StorageMutationRuntime,"unknown mutation cardinality","Lowering otrzymał nieobsługiwany zasięg mutacji.",57-storage-runtime-mutation-lowering.md
+SMR097,Error,StorageMutationRuntime,"unknown mutation runtime expression","Lowering otrzymał nieobsługiwane wyrażenie mutacji.",57-storage-runtime-mutation-lowering.md
+SMR098,Error,StorageMutationRuntime,"unknown mutation runtime predicate","Lowering otrzymał nieobsługiwany predykat mutacji.",57-storage-runtime-mutation-lowering.md
+SMR099,Error,StorageMutationRuntime,"unknown mutation runtime operation","Lowering otrzymał nieobsługiwany rodzaj mutacji.",57-storage-runtime-mutation-lowering.md
+SMC001,Error,StorageMutationCall,"named mutation outside @server task","Named mutation może być wywołana wyłącznie w tasku @server.",64-storage-task-mutation-binding.md
+SMC002,Error,StorageMutationCall,"mixed positional and named arguments","Wywołanie mutacji nie może mieszać argumentów pozycyjnych i nazwanych.",64-storage-task-mutation-binding.md
+SMC003,Error,StorageMutationCall,"duplicate named mutation argument","Nazwany argument mutacji może wystąpić tylko raz.",64-storage-task-mutation-binding.md
+SMC004,Error,StorageMutationCall,"unknown named mutation argument","Wywołanie zawiera nazwę argumentu spoza deklaracji mutation.",64-storage-task-mutation-binding.md
+SMC005,Error,StorageMutationCall,"mutation call argument type mismatch","Typ argumentu wywołania nie odpowiada parametrowi named mutation.",64-storage-task-mutation-binding.md

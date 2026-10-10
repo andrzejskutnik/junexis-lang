@@ -1,0 +1,4 @@
+name = "smart-home-first-decision"
+entry = "src/main.jnx"
+targets = ["server"]
+outDir = "out"

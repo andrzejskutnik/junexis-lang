@@ -1,0 +1,5 @@
+name = "smart-home-whole-home"
+entry = "src/main.jnx"
+targets = ["server"]
+outDir = "out"
+

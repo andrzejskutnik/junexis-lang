@@ -1,0 +1,98 @@
+// grammar/02-struct-and-enum.jnx
+// Pokrycie: structDeclaration, structField (z i bez default),
+//           enumDeclaration, enumVariant (0, 1, N typów danych)
+
+// ─── struct — pola bez wartości domyślnych ─────────────────────────────
+struct Point {
+    x: Float
+    y: Float
+}
+
+// ─── struct — pola z wartościami domyślnymi ────────────────────────────
+struct Config {
+    host:     Text    = "localhost"
+    port:     u16     = 8080
+    timeout:  Duration = 30s
+    retries:  u8      = 3
+    verbose:  Bool    = false
+}
+
+// ─── struct — pola złożone: tablice, mapy, union ───────────────────────
+struct ComplexFields {
+    tags:     [Text]
+    scores:   [Float]
+    metadata: Map<Text, Text>
+    value:    Int | Float       // union
+    parent:   Option<Text>      // generic (user-defined)
+}
+
+// ─── struct bez pól (pusty) ────────────────────────────────────────────
+struct Empty {
+}
+
+// ─── struct zagnieżdżony (referencja do innego struct) ─────────────────
+struct Address {
+    street: Text
+    city:   Text
+    zip:    Text
+}
+
+struct Person {
+    name:    Text
+    age:     u8
+    address: Address        // referencja do innego struct
+    friends: [Person]       // rekurencja przez array
+}
+
+// ─── enum — tylko warianty bez danych (C-style) ────────────────────────
+enum Direction {
+    North,
+    South,
+    East,
+    West
+}
+
+// ─── enum — trailing comma ─────────────────────────────────────────────
+enum HttpMethod {
+    GET,
+    POST,
+    PUT,
+    PATCH,
+    DELETE,
+}
+
+// ─── enum — warianty z pojedynczym typem danych (generic) ───────────────────
+enum Option<T> {
+    Some(T),
+    None
+}
+
+// ─── enum — warianty z wieloma typami danych ──────────────────────────
+enum Shape {
+    Circle(Float),                // r
+    Rectangle(Float, Float),      // w, h
+    Triangle(Float, Float, Float) // a, b, c
+}
+
+// ─── enum — warianty mieszane (z danymi i bez) ─────────────────────────
+enum Status {
+    Pending,
+    Running(Text),          // message
+    Failed(Text, u32),      // error, code
+    Done
+}
+
+// ─── enum — warianty z user-defined type ──────────────────────────────
+enum Event {
+    Connected(Address),
+    DataReceived(Text),
+    ErrorOccurred(Status),
+    Disconnected
+}
+
+// ─── enum — użycie struct jako pola ───────────────────────────────────
+struct Payload {
+    kind:    Status
+    source:  Address
+    tags:    [Text]
+}

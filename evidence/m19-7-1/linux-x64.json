@@ -1,0 +1,29 @@
+{
+  "schemaVersion": "junexis.portable-demonstrator-trial/0.1",
+  "platformVersion": "0.19.0-preview.1",
+  "project": "smart-home-laboratory",
+  "sourceRelocated": true,
+  "buildId": "2793f4aa297ab2301e8e517da55f2ff571e11836d4d5d928ce7c4361419a1915",
+  "execution": {
+    "mode": "simulation",
+    "deterministic": true,
+    "hardwareConnected": false,
+    "hardwareFallback": false,
+    "rooms": 3,
+    "scenario": "full-smart-home-and-restart-pass"
+  },
+  "variants": [
+    {
+      "rid": "win-x64",
+      "result": "cross-build"
+    },
+    {
+      "rid": "linux-x64",
+      "result": "native-simulation"
+    },
+    {
+      "rid": "osx-arm64",
+      "result": "cross-build"
+    }
+  ]
+}

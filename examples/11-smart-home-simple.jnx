@@ -1,0 +1,128 @@
+// Prosty inteligentny dom - przykład wieloplatformowy
+// Sensory embedded, brama i przetwarzanie w chmurze
+
+struct OdczytSensora {
+    id: Text,
+    wartosc: f32,
+    znacznik_czasu: u64
+}
+
+struct DaneTemperatury {
+    temperatura: f32,
+    wilgotnosc: f32,
+    znacznik_czasu: u64
+}
+
+struct ZdarzenieRuchu {
+    id_sensora: Text,
+    wykryto: Bool,
+    znacznik_czasu: u64
+}
+
+struct KomendaUrzadzenia {
+    id_docelowe: Text,
+    akcja: Text
+}
+
+struct WiadomoscAlertu {
+    typ: Text,
+    wiadomosc: Text,
+    znacznik_czasu: u64
+}
+
+struct SurowyOdczytDht22 {
+    temp: f32,
+    wilg: f32
+}
+
+extern task odczytaj_dht22(pin: u8) @embedded -> SurowyOdczytDht22
+extern task czas_systemowy() @embedded -> u64
+
+// Sensor temperatury na ESP32
+task ZadanieSensoraTemp() @embedded(esp32c3) -> chan<DaneTemperatury> {
+    config {
+        pin_dht22: u8 : 4,
+        interwal_s: u32 : 30
+    }
+
+    every 30s {
+        var odczyt = odczytaj_dht22(pin_dht22);
+        send DaneTemperatury {
+            temperatura: odczyt.temp,
+            wilgotnosc: odczyt.wilg,
+            znacznik_czasu: czas_systemowy()
+        };
+    }
+}
+
+// Sensor ruchu na ESP32
+task ZadanieSensoraRuchu() @embedded(esp32c3) -> chan<ZdarzenieRuchu> {
+    config {
+        pin_pir: u8 : 5
+    }
+
+    on connect {
+        send ZdarzenieRuchu {
+            id_sensora: "pir-salon",
+            wykryto: true,
+            znacznik_czasu: czas_systemowy()
+        };
+    }
+}
+
+// Brama agregująca dane z sensorów
+task ZadanieBramy(
+    temp: chan<DaneTemperatury>,
+    ruch: chan<ZdarzenieRuchu>
+) @server -> chan<OdczytSensora> {
+    for dane in temp {
+        send OdczytSensora {
+            id: "temperatura",
+            wartosc: dane.temperatura,
+            znacznik_czasu: dane.znacznik_czasu
+        };
+    }
+
+    for zdarzenie in ruch {
+        var wartosc_ruchu: f32 = zdarzenie.wykryto ? f32(1.0) : f32(0.0);
+        send OdczytSensora {
+            id: "ruch",
+            wartosc: wartosc_ruchu,
+            znacznik_czasu: zdarzenie.znacznik_czasu
+        };
+    }
+}
+
+// Procesor w chmurze
+task ProcesorChmury(dane: chan<OdczytSensora>) @server -> chan<KomendaUrzadzenia> {
+    state ostatnia_temp: f32 = 0.0;
+
+    for odczyt in dane {
+        if odczyt.id == "temperatura" {
+            ostatnia_temp = odczyt.wartosc;
+            if ostatnia_temp > 25.0 {
+                send KomendaUrzadzenia {
+                    id_docelowe: "klimatyzacja",
+                    akcja: "wlacz"
+                };
+            }
+        }
+    }
+}
+
+pipeline PotokInteligentnegoDom {
+    use ZadanieSensoraTemp -> ZadanieBramy;
+    use ZadanieSensoraRuchu -> ZadanieBramy;
+    use ZadanieBramy -> ProcesorChmury;
+}
+
+deployment WdrozenieDom {
+    target embedded {
+        ZadanieSensoraTemp @embedded(esp32c3) { adres_ip: "192.168.1.21" }
+        ZadanieSensoraRuchu @embedded(esp32c3) { adres_ip: "192.168.1.22" }
+    }
+    target server {
+        ZadanieBramy @server { repliki: 1 }
+        ProcesorChmury @server { repliki: 2 }
+    }
+}

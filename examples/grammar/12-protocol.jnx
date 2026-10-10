@@ -1,0 +1,77 @@
+// grammar/12-protocol.jnx
+// Pokrycie: protocolDeclaration, protocolBody (opaque — balanced braces),
+//           różne style treści wewnątrz protokołu (D7)
+
+// ─── protocol minimalny (puste ciało) ────────────────────────────────
+protocol EmptyProto {
+}
+
+// ─── protocol REST ────────────────────────────────────────────────────
+protocol rest {
+    base_url: "https://api.example.com/v1"
+
+    endpoint GET /users -> [User]
+    endpoint GET /users/{id} -> User
+    endpoint POST /users { body: CreateUserRequest } -> User
+    endpoint PUT  /users/{id} { body: UpdateUserRequest } -> User
+    endpoint DELETE /users/{id} -> Empty
+
+    auth { type: bearer, header: "Authorization" }
+    rate_limit { requests: 100, per: 1m }
+}
+
+// ─── protocol gRPC ────────────────────────────────────────────────────
+protocol grpc {
+    service UserService {
+        rpc GetUser(GetUserRequest) returns (User)
+        rpc ListUsers(ListUsersRequest) returns (stream User)
+        rpc CreateUser(CreateUserRequest) returns (User)
+        rpc WatchUpdates(WatchRequest) returns (stream UserEvent)
+    }
+    options {
+        deadline:     30s
+        max_msg_size: 4MB
+    }
+}
+
+// ─── protocol WebSocket ───────────────────────────────────────────────
+protocol websocket {
+    path: "/ws/events"
+    encoding: "json"
+    heartbeat: 30s
+    reconnect { max_attempts: 5, backoff: exponential }
+    messages {
+        outgoing: [UserEvent, Notification]
+        incoming: [Command, Ping]
+    }
+}
+
+// ─── protocol MQTT ────────────────────────────────────────────────────
+protocol mqtt {
+    broker: "mqtt://broker.local:1883"
+    client_id: "junexis-node"
+    qos: 1
+    topics {
+        publish:   "sensors/+/data"
+        subscribe: "commands/#"
+        subscribe: "alerts/critical"
+    }
+}
+
+// ─── protocol z zagnieżdżonymi klamrami ───────────────────────────────
+protocol amqp {
+    connection {
+        host: "rabbitmq.local"
+        port: 5672
+        vhost: "/"
+        credentials { user: "guest", password: "secret" }
+    }
+    exchanges {
+        events { type: topic, durable: true }
+        commands { type: direct, durable: false }
+    }
+    queues {
+        sensor_events { exchange: events, binding: "sensor.*.data" }
+        commands      { exchange: commands, binding: "cmd.#" }
+    }
+}

@@ -1,0 +1,156 @@
+// Przykład systemu inteligentnego domu z sensorami IoT
+// Demonstruje komunikację między urządzeniami embedded i serwerem
+
+struct DaneTemperatury {
+    id_urzadzenia: Text,
+    temperatura: f32,
+    wilgotnosc: f32,
+    znacznik_czasu: u64
+}
+
+struct ZdarzenieRuchu {
+    id_urzadzenia: Text,
+    wykryto_ruch: Bool,
+    strefa: Text,
+    znacznik_czasu: u64
+}
+
+struct KomendaOswietlenia {
+    id_urzadzenia: Text,
+    wlaczone: Bool,
+    jasnosc: u8,
+    kolor: Text
+}
+
+struct StatusUrzadzenia {
+    id_urzadzenia: Text,
+    typ: TypUrzadzenia,
+    online: Bool,
+    poziom_baterii: u8
+}
+
+struct Alert {
+    priorytet: Priorytet,
+    wiadomosc: Text,
+    id_urzadzenia: Text,
+    znacznik_czasu: u64
+}
+
+enum TypUrzadzenia {
+    Sensor,
+    Aktuator,
+    Kamera,
+    Zamek
+}
+
+enum Priorytet {
+    Niski,
+    Sredni,
+    Wysoki,
+    Krytyczny
+}
+
+struct SurowyOdczytDht22 {
+    temperatura: f32,
+    wilgotnosc: f32
+}
+
+extern task odczytaj_dht22(pin: u8) @embedded -> SurowyOdczytDht22
+extern task czas_systemowy() @embedded -> u64
+extern task ustaw_oswietlenie(pin: u8, wlaczone: Bool, jasnosc: u8) @embedded
+extern task zapisz_zdarzenie(komenda: KomendaOswietlenia) @server
+extern task wyslij_do_panelu(komenda: KomendaOswietlenia) @server
+
+// Sensor temperatury na ESP32-C3
+task SensorTemperatury() @embedded(esp32c3) -> chan<DaneTemperatury> {
+    config {
+        pin_dht22: u8 : 4,
+        okres_pomiaru_ms: u32 : 5000
+    }
+
+    every 5s {
+        var odczyt = odczytaj_dht22(pin_dht22);
+        send DaneTemperatury {
+            id_urzadzenia: "sensor-temp-01",
+            temperatura: odczyt.temperatura,
+            wilgotnosc: odczyt.wilgotnosc,
+            znacznik_czasu: czas_systemowy()
+        };
+    }
+}
+
+// Sensor ruchu na ESP32-C3
+task SensorRuchu() @embedded(esp32c3) -> chan<ZdarzenieRuchu> {
+    config {
+        pin_pir: u8 : 5,
+        strefa: Text : "salon"
+    }
+
+    on connect {
+        send ZdarzenieRuchu {
+            id_urzadzenia: "sensor-ruch-01",
+            wykryto_ruch: true,
+            strefa: strefa,
+            znacznik_czasu: czas_systemowy()
+        };
+    }
+}
+
+// Sterownik oświetlenia na ESP32-C3
+task SterownikOswietlenia(komendy: chan<KomendaOswietlenia>) @embedded(esp32c3) {
+    config {
+        pin_led: u8 : 2
+    }
+
+    for komenda in komendy {
+        ustaw_oswietlenie(pin_led, komenda.wlaczone, komenda.jasnosc);
+    }
+}
+
+// Centrum inteligentnego domu na serwerze
+task CentrumInteligentnegDomu(
+    temperatura: chan<DaneTemperatury>,
+    ruch: chan<ZdarzenieRuchu>
+) @server -> chan<KomendaOswietlenia> {
+    state ostatnia_temperatura: f32 = 20.0;
+    state ruch_wykryty: Bool = false;
+
+    for dane in temperatura {
+        ostatnia_temperatura = dane.temperatura;
+        if dane.temperatura > 30.0 {
+            send KomendaOswietlenia {
+                id_urzadzenia: "oswietlenie-01",
+                wlaczone: true,
+                jasnosc: 50,
+                kolor: "zimny bialy"
+            };
+        }
+    }
+
+    for zdarzenie in ruch {
+        ruch_wykryty = zdarzenie.wykryto_ruch;
+        if zdarzenie.wykryto_ruch {
+            send KomendaOswietlenia {
+                id_urzadzenia: "oswietlenie-salon",
+                wlaczone: true,
+                jasnosc: 100,
+                kolor: "cieply bialy"
+            };
+        }
+    }
+}
+
+// Raportowanie do panelu
+task ReporterPanelu(komendy: chan<KomendaOswietlenia>) @server {
+    for komenda in komendy {
+        zapisz_zdarzenie(komenda);
+        wyslij_do_panelu(komenda);
+    }
+}
+
+pipeline PotokInteligentnegDomu {
+    use SensorTemperatury -> CentrumInteligentnegDomu;
+    use SensorRuchu -> CentrumInteligentnegDomu;
+    use CentrumInteligentnegDomu -> SterownikOswietlenia;
+    use CentrumInteligentnegDomu -> ReporterPanelu;
+}

@@ -1,0 +1,55 @@
+// PRZYKŁAD 02: Server Storage Extern
+// Cel: pokazać kontrolowaną granicę między Junexis a kodem Go użytkownika.
+//
+// Junexis pozostaje właścicielem architektury, typów i kontraktów.
+// Implementacja storage w pliku user/server/storage.go należy do developera.
+
+struct TempReading {
+    celsius: Float
+    device_id: Text
+    timestamp: Time
+}
+
+// Blokowy extern opisuje granicę integracji i ownership kodu docelowego.
+// Generator emituje manifest: out/server/externs/junexis.externs.toml
+extern storage TemperatureStore {
+    target server
+    language go
+    file "user/server/storage.go"
+
+    fn save(reading: TempReading)
+    fn recent(limit: Int) -> List<TempReading>
+}
+
+// Aktualny mechanizm wywołania z tasków to nadal extern task.
+// Nazwy są celowo jawne: runtime/host może zbindować je do implementacji
+// TemperatureStore w user/server/storage.go.
+extern task TemperatureStore_save(reading: TempReading) @server
+extern task TemperatureStore_recent(limit: Int) @server -> List<TempReading>
+
+task DemoReadingSource() @server -> chan<TempReading> {
+    every 10s {
+        send TempReading {
+            celsius: 21.5,
+            device_id: "demo-server-sensor",
+            timestamp: now()
+        }
+    }
+}
+
+task IngestReading(input: chan<TempReading>) @server {
+    for reading in input {
+        TemperatureStore_save(reading)
+    }
+}
+
+task RecentReadingsApi() @server -> chan<List<TempReading>> {
+    every 10s {
+        let readings = TemperatureStore_recent(10)
+        send readings
+    }
+}
+
+pipeline StorageFlow {
+    use DemoReadingSource -> IngestReading
+}

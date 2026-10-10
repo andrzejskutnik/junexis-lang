@@ -1,0 +1,4 @@
+name = "smart-home-first-sensor"
+entry = "src/main.jnx"
+targets = ["server"]
+outDir = "out"

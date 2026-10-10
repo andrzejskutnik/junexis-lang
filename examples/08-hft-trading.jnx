@@ -1,0 +1,100 @@
+// Przykład systemu transakcji wysokiej częstotliwości (HFT) w JunexisLang
+// Demonstruje przetwarzanie danych rynkowych w czasie rzeczywistym
+
+struct DaneRynkowe {
+    symbol: Text,
+    cena: f64,
+    wolumen: u64,
+    znacznik_czasu: u64
+}
+
+struct Zlecenie {
+    id: u64,
+    symbol: Text,
+    strona: StronaZlecenia,
+    cena: f64,
+    ilosc: u64
+}
+
+struct RaportWykonania {
+    id_zlecenia: u64,
+    status: StatusZlecenia,
+    cena_wykonania: f64,
+    wykonana_ilosc: u64
+}
+
+struct MetrykiRyzyka {
+    ekspozycja: f64,
+    var_dzienny: f64,
+    wspolczynnik_sharpe: f64
+}
+
+enum StronaZlecenia {
+    Kupno,
+    Sprzedaz
+}
+
+enum StatusZlecenia {
+    Oczekujace,
+    Wypelnione,
+    CzesciowoWypelnione,
+    Anulowane
+}
+
+struct SygnalTransakcji {
+    sila: f64,           // siła sygnału 0.0–1.0
+    kierunek: Text       // "kupno" | "sprzedaz"
+}
+
+// Zewnętrzne funkcje implementowane przez użytkownika (extern)
+extern task pobierz_dane_rynkowe() @server -> DaneRynkowe
+extern task analizuj(dane: DaneRynkowe) @server -> SygnalTransakcji
+extern task generuj_zlecenie(dane: DaneRynkowe, sygnal: SygnalTransakcji) @server -> Zlecenie
+extern task wykonaj_zlecenie(zlecenie: Zlecenie) @server -> RaportWykonania
+extern task aktualizuj_ekspozycje(ekspozycja: f64, raport: RaportWykonania) @server -> f64
+extern task zarzadz_ryzykiem() @server
+
+// Strumień danych rynkowych co 1ms
+task ZrodloDanychRynkowych() @server -> chan<DaneRynkowe> {
+    every 1ms {
+        var dane = pobierz_dane_rynkowe();
+        send dane;
+    }
+}
+
+// Silnik strategii tradingowej
+task SilnikStrategii(wejscie: chan<DaneRynkowe>) @server -> chan<Zlecenie> {
+    for dane in wejscie {
+        var sygnal = analizuj(dane);
+        if sygnal.sila > 0.8 {
+            send generuj_zlecenie(dane, sygnal);
+        }
+    }
+}
+
+// Router zleceń
+task RouterZlecen(wejscie: chan<Zlecenie>) @server -> chan<RaportWykonania> {
+    for zlecenie in wejscie {
+        var raport = wykonaj_zlecenie(zlecenie);
+        send raport;
+    }
+}
+
+// Monitor ryzyka
+task MonitorRyzyka(wykonania: chan<RaportWykonania>) @server {
+    state ekspozycja: f64 = 0.0;
+
+    for raport in wykonania {
+        ekspozycja = aktualizuj_ekspozycje(ekspozycja, raport);
+        if ekspozycja > 1000000.0 {
+            // Przekroczono limit ryzyka - zamknij pozycje
+            zarzadz_ryzykiem();
+        }
+    }
+}
+
+pipeline PotokTransakcyjny {
+    use ZrodloDanychRynkowych -> SilnikStrategii;
+    use SilnikStrategii -> RouterZlecen;
+    use RouterZlecen -> MonitorRyzyka;
+}

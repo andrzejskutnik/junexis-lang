@@ -1,0 +1,43 @@
+{
+  "$schema": "junexis.report-view/0.1",
+  "title": "Dom 11 — granice i powrót urządzenia",
+  "layout": "grid",
+  "panels": [
+    {
+      "task": "HomeReport",
+      "title": "Stan urządzenia w domu",
+      "fields": [
+        {
+          "path": "device_id",
+          "label": "Urządzenie",
+          "format": "text"
+        },
+        {
+          "path": "status",
+          "label": "Stan",
+          "format": "text"
+        },
+        {
+          "path": "reason",
+          "label": "Powód decyzji",
+          "format": "text"
+        },
+        {
+          "path": "connection_generation",
+          "label": "Generacja połączenia",
+          "format": "number"
+        },
+        {
+          "path": "sequence",
+          "label": "Numer obserwacji",
+          "format": "number"
+        },
+        {
+          "path": "safe_state",
+          "label": "Stan bezpieczny",
+          "format": "boolean"
+        }
+      ]
+    }
+  ]
+}

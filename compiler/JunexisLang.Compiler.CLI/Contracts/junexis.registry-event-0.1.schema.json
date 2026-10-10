@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:junexis:schema:registry-event:0.1",
+  "title": "Zdarzenie Junexis Registry 0.1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "eventId", "correlationId", "occurredAtUtc", "producer", "operation", "phase"],
+  "properties": {
+    "schemaVersion": { "const": "junexis.registry-event/0.1" },
+    "eventId": { "$ref": "#/$defs/uuid" },
+    "correlationId": { "$ref": "#/$defs/uuid" },
+    "occurredAtUtc": { "type": "string", "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-([0-2][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](?:\\.[0-9]{1,7})?Z(?![\\s\\S])" },
+    "producer": { "enum": ["registry", "compiler", "installer", "publisher"] },
+    "operation": { "enum": ["snapshot-read", "artifact-download", "artifact-publication"] },
+    "phase": { "enum": ["started", "completed"] },
+    "outcome": { "enum": ["succeeded", "failed", "canceled"] },
+    "durationMs": { "type": "integer", "minimum": 0, "maximum": 86400000 },
+    "errorCode": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?![\\s\\S])" },
+    "snapshotId": { "$ref": "#/$defs/sha256" },
+    "artifact": { "$ref": "#/$defs/artifact" }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "phase": { "const": "started" } }, "required": ["phase"] },
+      "then": {
+        "not": {
+          "anyOf": [
+            { "required": ["outcome"] },
+            { "required": ["durationMs"] },
+            { "required": ["errorCode"] }
+          ]
+        }
+      }
+    },
+    {
+      "if": { "properties": { "phase": { "const": "completed" } }, "required": ["phase"] },
+      "then": { "required": ["outcome", "durationMs"] }
+    },
+    {
+      "if": { "properties": { "outcome": { "const": "failed" } }, "required": ["outcome"] },
+      "then": { "required": ["errorCode"] },
+      "else": { "not": { "required": ["errorCode"] } }
+    },
+    {
+      "if": { "properties": { "operation": { "const": "snapshot-read" } }, "required": ["operation"] },
+      "then": { "not": { "required": ["artifact"] } },
+      "else": { "required": ["artifact"] }
+    },
+    {
+      "if": {
+        "properties": {
+          "operation": { "const": "snapshot-read" },
+          "phase": { "const": "completed" },
+          "outcome": { "const": "succeeded" }
+        },
+        "required": ["operation", "phase", "outcome"]
+      },
+      "then": { "required": ["snapshotId"] }
+    }
+  ],
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["artifactType", "id", "version", "sha256"],
+      "properties": {
+        "artifactType": { "enum": ["package", "provider"] },
+        "id": { "type": "string", "pattern": "^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*(?![\\s\\S])" },
+        "version": { "$ref": "#/$defs/semver" },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "uuid": { "type": "string", "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}(?![\\s\\S])" },
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}(?![\\s\\S])" },
+    "semver": {
+      "type": "string",
+      "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)(?:-((?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?(?![\\s\\S])"
+    }
+  }
+}

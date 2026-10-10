@@ -1,0 +1,50 @@
+// Minimalny potok przetwarzania — przykład podstawowy
+// Demonstruje najprostszy możliwy potok: sensor → przetwarzanie
+
+struct DaneSensora {
+    temperatura: f32,
+    wilgotnosc: f32
+}
+
+struct PrzetworzoneDane {
+    srednia_temp: f32,
+    srednia_wilg: f32
+}
+
+extern task odczytaj_temperature() @embedded -> f32
+extern task odczytaj_wilgotnosc() @embedded -> f32
+
+// Czytnik sensora na ESP32
+task CzytnikSensora() @embedded(esp32) -> chan<DaneSensora> {
+    every 1s {
+        var temp = odczytaj_temperature();
+        var wilg = odczytaj_wilgotnosc();
+        send DaneSensora {
+            temperatura: temp,
+            wilgotnosc: wilg
+        };
+    }
+}
+
+// Procesor danych na serwerze
+task ProcesorDanych(wejscie: chan<DaneSensora>) @server -> chan<PrzetworzoneDane> {
+    state suma_temp: f32 = 0.0;
+    state suma_wilg: f32 = 0.0;
+    state licznik: u32 = 0;
+
+    for odczyt in wejscie {
+        suma_temp = suma_temp + odczyt.temperatura;
+        suma_wilg = suma_wilg + odczyt.wilgotnosc;
+        licznik = licznik + 1;
+
+        send PrzetworzoneDane {
+            srednia_temp: suma_temp / licznik,
+            srednia_wilg: suma_wilg / licznik
+        };
+    }
+}
+
+// Definicja potoku
+pipeline PotokSensora {
+    use CzytnikSensora -> ProcesorDanych;
+}

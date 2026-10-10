@@ -1,0 +1,42 @@
+# RP2040 Platform Profile
+# Raspberry Pi dual-core ARM Cortex-M0+ microcontroller
+# Phase 27.5 - YAML-based platform profiles
+
+version: "1.0"
+platform: "@embedded"
+variant: "rp2040"
+
+capabilities:
+  threading: true # Dual-core (FreeRTOS/custom RTOS)
+  fileIO: false # No file system by default
+  networking: false # No WiFi (Pico W has separate WiFi chip)
+  async: false # No async/await on embedded
+  dynamicAllocation: true # Heap available
+  realTimeClock: true # RTC peripheral
+  hardwareInterrupts: true # NVIC interrupts
+
+limits:
+  maxMemoryBytes: 270336 # 264 KB SRAM
+  maxConcurrentTasks: 16 # RTOS tasks (dual-core)
+
+metadata:
+  description: "RP2040 dual-core ARM Cortex-M0+ microcontroller"
+  manufacturer: "Raspberry Pi Foundation"
+  architecture: "ARM Cortex-M0+"
+  frequency: "133MHz"
+  releaseYear: 2021
+
+hardware:
+  ram: "264 KB SRAM"
+  flash: "2-16 MB (external QSPI)"
+
+recommended:
+  useCases:
+    - "Cost-effective dual-core projects"
+    - "PIO-based custom protocols"
+    - "USB device development"
+    - "Real-time control (dual-core)"
+  notRecommended:
+    - "WiFi/BLE applications (unless using Pico W)"
+    - "High-performance computing (133MHz limit)"
+    - "Battery-critical apps (dual-core power draw)"

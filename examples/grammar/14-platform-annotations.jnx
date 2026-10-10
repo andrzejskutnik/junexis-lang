@@ -1,0 +1,86 @@
+// grammar/14-platform-annotations.jnx
+// Pokrycie: platformAnnotation, platformTarget (wszystkie tokeny + forward-compat IDENTIFIER),
+//           platformArgument (klucz=wartość, positional literal, positional IDENTIFIER)
+// Każdy platformTarget ma co najmniej jeden example.
+
+// ─── @embedded ────────────────────────────────────────────────────────
+task A1() @embedded { }                                      // bez args
+task A2() @embedded(esp32c3) { }                             // positional IDENTIFIER
+task A3() @embedded("stm32f4") { }                           // positional STRING_LITERAL
+task A4() @embedded(esp32s3, memory = 8MB) { }               // IDENTIFIER + klucz=wartość (MEMORY_UNIT)
+task A5() @embedded(variant = "esp32s3") { }                 // klucz=STRING
+task A6() @embedded(variant = esp32c3, flash = 4MB) { }      // dwa klucz=wartość
+
+// ─── @server ──────────────────────────────────────────────────────────
+task B1() @server { }                                        // bez args
+task B2() @server(workers = 4) { }                           // klucz=INT
+task B3() @server(memory = 512MB, cpu = 2) { }               // dwa args
+task B4() @server(region = "eu-west-1") { }                  // klucz=STRING
+task B5() @server(replicas = 3, timeout = 30s) { }           // INT + DURATION
+task B6() @server("go") { }                                  // positional STRING (target runtime)
+
+// ─── @report ──────────────────────────────────────────────────────────
+task C1() @report { }                                        // bez args
+task C2() @report("react") { }                               // positional STRING
+task C3() @report(framework = "vue", port = 3000) { }        // dwa klucz=wartość
+
+// ─── @edge ────────────────────────────────────────────────────────────
+task D1() @edge { }
+task D2() @edge(region = "eu") { }
+task D3() @edge(latency = 5ms, bandwidth = 100MB) { }
+
+// ─── @cloud_server ────────────────────────────────────────────────────
+task E1() @cloud_server { }
+task E2() @cloud_server(provider = "aws", region = "eu-west-1") { }
+task E3() @cloud_server(autoscale = true, min = 2, max = 10) { }
+
+// ─── @mobile ──────────────────────────────────────────────────────────
+task F1() @mobile { }
+task F2() @mobile("ios") { }
+task F3() @mobile(platform = "android", min_sdk = 24) { }
+
+// ─── @desktop ─────────────────────────────────────────────────────────
+task G1() @desktop { }
+task G2() @desktop("windows") { }
+task G3() @desktop(os = "linux", arch = "x86_64") { }
+
+// ─── @web ─────────────────────────────────────────────────────────────
+task H1() @web { }
+task H2() @web("wasm") { }
+task H3() @web(target = "browser", bundler = "vite") { }
+
+// ─── @microcontroller ─────────────────────────────────────────────────
+task I1() @microcontroller { }
+task I2() @microcontroller("avr") { }
+task I3() @microcontroller(family = "avr", board = "uno") { }
+
+// ─── @fog_node ────────────────────────────────────────────────────────
+task J1() @fog_node { }
+task J2() @fog_node(zone = "factory-floor") { }
+task J3() @fog_node(latency = 2ms, storage = 64GB) { }
+
+// ─── @data_center ─────────────────────────────────────────────────────
+task K1() @data_center { }
+task K2() @data_center(rack = "A3", zone = "dc1") { }
+task K3() @data_center(power = "redundant", cooling = "liquid") { }
+
+// ─── Forward-compatible: IDENTIFIER jako platforma ─────────────────────
+// Parser akceptuje dowolny IDENTIFIER jako platformTarget
+task L1() @quantum { }
+task L2() @fpga(xilinx_zynq) { }
+task L3() @gpu(cuda, sm = 86) { }
+
+// ─── Wielokrotne platformAnnotation (D) na jednym tasku ───────────────
+task M1()
+    @embedded(esp32c3)
+    @server(workers = 2)
+    -> chan<Int>
+{
+    every 1s { send 1 }
+}
+
+task M2()
+    @embedded
+    @server
+    @report
+{ }

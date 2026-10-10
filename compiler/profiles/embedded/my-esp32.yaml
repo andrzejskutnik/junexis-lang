@@ -1,0 +1,33 @@
+# Custom ESP32 Profile - Example of Profile Inheritance (Phase 27.8 Step 1)
+# Demonstrates selective override (memory only) with inheritance
+
+version: "1.0"
+platform: "@embedded"
+variant: "my-esp32"
+extends: "esp32c3" # Inherit from esp32c3 base profile
+
+metadata:
+  description: "Custom ESP32-C3 without networking, 512KB RAM"
+  manufacturer: "Espressif"
+  architecture: "RISC-V"
+  frequency: "160MHz"
+  releaseYear: 2025
+  documentation: "https://example.com/my-esp32"
+
+# Capabilities: All omitted → inherit from esp32c3 parent
+# (threading: false, fileIO: false, networking: true, async: false, etc.)
+
+# Limits: Only maxMemoryBytes overridden (>0), maxConcurrentTasks inherited (0=inherit)
+limits:
+  maxMemoryBytes: 524288 # 512KB instead of 400KB (>0 = override)
+  maxConcurrentTasks: 0 # 0 = inherit from parent 16
+
+# Hardware section inherited from esp32c3
+
+# Constraints inherited from esp32c3 + add custom one
+constraints:
+  - type: "info"
+    severity: "info"
+    message: "Custom ESP32 profile with increased RAM"
+    code: "CUSTOM_PROFILE"
+# Recommended section inherited from esp32c3

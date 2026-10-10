@@ -1,0 +1,17 @@
+storage HomeData {
+    entity Observation {
+        id: Uuid
+        homeId: Uuid
+        sensor: Text
+        value: Float
+        recordedAt: Time
+        key(id)
+    }
+
+    query RecentObservations(homeId: Uuid) from Observation {
+        filter homeId == params.homeId
+        project sensor as sensorName, value, recordedAt
+        sort recordedAt desc
+        limit 20
+    }
+}

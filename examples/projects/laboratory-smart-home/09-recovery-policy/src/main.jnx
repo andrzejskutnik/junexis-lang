@@ -1,0 +1,110 @@
+// Laboratorium Junexis — Dom 9: jawna polityka recovery.
+
+struct HomeSignal {
+    kind: Text
+    room: Text
+    air_quality: Float
+    source_status: Text
+    observed_at: Time
+}
+
+struct PolicyDecision {
+    room: Text
+    air_quality: Float
+    outcome: Text
+    actual_enabled: Bool
+    execution_status: Text
+    recovery_mode: Text
+    recovery_phase: Text
+    fresh_evidence: Int
+    required_evidence: Int
+    stabilization_delay_ms: Int
+    evidence_limit: Int
+    policy_revision: Int
+    reason: Text
+    decided_at: Time
+}
+
+extern laboratory HomePolicy {
+    target server
+    language go
+    file "user/server/home_policy.go"
+
+    fn salon_available() -> Bool
+    fn record_salon(observed_at: Time, air_quality: Float)
+    fn health() -> HomeSignal
+    fn evaluate(signal: HomeSignal) -> PolicyDecision
+    fn publish(decision: PolicyDecision)
+}
+
+extern task HomePolicy_salon_available() @server -> Bool
+extern task HomePolicy_record_salon(observed_at: Time, air_quality: Float) @server
+extern task HomePolicy_health() @server -> HomeSignal
+extern task HomePolicy_evaluate(signal: HomeSignal) @server -> PolicyDecision
+extern task HomePolicy_publish(decision: PolicyDecision) @server
+
+task RoomSensors() @server -> chan<HomeSignal> {
+    state step: Int = 0
+    every 1s {
+        step = step + 1
+        if step == 1 {
+            if HomePolicy_salon_available() {
+                let salon_time = now()
+                HomePolicy_record_salon(salon_time, 1250.0)
+                send HomeSignal {
+                    kind: "reading", room: "salon", air_quality: 1250.0,
+                    source_status: "online", observed_at: salon_time
+                }
+            }
+        }
+        if step == 2 {
+            send HomeSignal {
+                kind: "reading", room: "kuchnia", air_quality: 780.0,
+                source_status: "online", observed_at: now()
+            }
+        }
+        if step == 3 {
+            send HomeSignal {
+                kind: "reading", room: "sypialnia", air_quality: 920.0,
+                source_status: "online", observed_at: now()
+            }
+            step = 0
+        }
+    }
+}
+
+task SilenceMonitor() @server -> chan<HomeSignal> {
+    every 1s { send HomePolicy_health() }
+}
+
+task HomeSignalMerge(readings: chan<HomeSignal>, health: chan<HomeSignal>) @server -> chan<HomeSignal> {
+    loop {
+        let reading = recv readings
+        send reading
+        let health_signal = recv health
+        send health_signal
+    }
+}
+
+task PolicyEngine(signals: chan<HomeSignal>) @server -> chan<PolicyDecision> {
+    loop {
+        let signal = recv signals
+        send HomePolicy_evaluate(signal)
+    }
+}
+
+task PolicyProjection(decisions: chan<PolicyDecision>) @server {
+    for decision in decisions {
+        if decision.room != "" {
+            HomePolicy_publish(decision)
+            log("POLITYKA pokoj={decision.room} faza={decision.recovery_phase} dowody={decision.fresh_evidence}/{decision.required_evidence} wykonanie={decision.execution_status} stan={decision.actual_enabled}")
+        }
+    }
+}
+
+pipeline RecoveryPolicyFlow {
+    use RoomSensors -> HomeSignalMerge
+    use SilenceMonitor -> HomeSignalMerge
+    use HomeSignalMerge -> PolicyEngine
+    use PolicyEngine -> PolicyProjection
+}

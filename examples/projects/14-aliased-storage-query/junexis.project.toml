@@ -1,0 +1,5 @@
+name = "aliased-storage-query"
+entry = "src/main.jnx"
+sourceRoots = ["src"]
+targets = ["server"]
+outDir = "out"

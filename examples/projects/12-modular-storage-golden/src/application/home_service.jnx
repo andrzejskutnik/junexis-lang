@@ -1,0 +1,24 @@
+import domain::observations
+import storage::home_store
+
+task SaveHomeObservation(observation: HomeObservation) @server -> SaveResult {
+    return HomeStore_save(observation)
+}
+
+task ReadHomeSnapshot(room: Text) @server -> HomeSnapshot {
+    return HomeStore_snapshot(room, 20)
+}
+
+task CheckHomeStorage() @server -> Bool {
+    return HomeStore_health_check()
+}
+
+task VerifyHomeRollback(observation: HomeObservation) @server -> Bool {
+    return HomeStore_rollback_probe(observation)
+}
+
+task PublishHomeSnapshot() @server -> chan<HomeSnapshot> {
+    every 2s {
+        send HomeStore_snapshot("living-room", 20)
+    }
+}

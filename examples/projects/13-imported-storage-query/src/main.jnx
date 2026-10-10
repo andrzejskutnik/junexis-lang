@@ -1,0 +1,6 @@
+import data::home { HomeData }
+
+task ReadHome(homeId: Uuid) @server
+    -> List<HomeData_RecentObservationsRow> {
+    return HomeData_RecentObservations(homeId: homeId)
+}

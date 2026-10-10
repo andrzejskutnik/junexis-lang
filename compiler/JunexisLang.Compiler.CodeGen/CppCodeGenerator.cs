@@ -1,0 +1,1409 @@
+namespace JunexisLang.Compiler.CodeGen;
+
+using System.Globalization;
+using System.Text;
+using System.Text.RegularExpressions;
+using JunexisLang.Compiler.Core;
+using JunexisLang.Compiler.Core.Platform;
+using JunexisLang.Compiler.IR;
+
+/// <summary>
+/// Generuje C++ dla zadań z adnotacją <c>@embedded</c>.
+/// Wyjście: <c>embedded/junexis_app.cpp</c> + <c>embedded/&lt;Task&gt;.h</c> per task.
+/// </summary>
+public sealed class CppCodeGenerator : ICodeGenerator
+{
+    [ThreadStatic]
+    private static IReadOnlyDictionary<string, IRType>? _currentTaskScope;
+    [ThreadStatic]
+    private static Dictionary<string, QueueAckBinding>? _queueAckBindings;
+
+    private sealed record QueueAckBinding(string QueueExpression, string MessageIdExpression);
+
+    /// <inheritdoc/>
+    public string Platform => "embedded";
+
+    /// <inheritdoc/>
+    public IReadOnlyList<GeneratedFile> Generate(IRDocument ir, CodeGenOptions options)
+    {
+        var tasks = ir.Tasks
+            .Where(t => t.Platforms.Any(p => p.Target == "embedded"))
+            .ToList();
+
+        if (tasks.Count == 0)
+            return [];
+
+        var tracePolicy = TraceRuntimeContract.ResolvePolicy(ir.Narratives);
+        var tracingEnabled = tracePolicy is not TraceEmissionPolicy.Off;
+        var serverTaskNames = ir.Tasks
+            .Where(t => t.Platforms.Any(p => p.Target == "server"))
+            .Select(t => t.Name)
+            .ToHashSet();
+        var crossPlatformSources = ir.Pipelines
+            .SelectMany(p => FlattenConnections(p.Connections))
+            .OfType<IRUseConn>()
+            .Where(c => c.TargetTask != null && serverTaskNames.Contains(c.TargetTask))
+            .Select(c => c.SourceTask)
+            .ToHashSet();
+        var structsByName = ir.Structs.ToDictionary(s => s.Name);
+
+        var resolvedPlatforms = tasks.ToDictionary(
+            task => task.Name,
+            task => ResolveEmbeddedPlatform(ir, task));
+        var files = new List<GeneratedFile>
+        {
+            GenerateTypes(ir),
+            GenerateRuntimeHeader(tracingEnabled),
+            GenerateConfigHeader(),
+            GeneratePlatformIo(ir, tasks, resolvedPlatforms, crossPlatformSources.Count > 0 || tracingEnabled)
+        };
+        if (tracingEnabled)
+            files.Add(GenerateTraceTransport());
+
+        _tracePolicy = tracePolicy;
+        _traceNarrativeId = tracingEnabled ? ir.Narratives.FirstOrDefault()?.Label : null;
+        _traceSourceMap = ir.SourceMap.ToDictionary(entry => entry.Path, entry => entry.Source, StringComparer.Ordinal);
+        var taskTcpPorts = new Dictionary<string, int>();
+        int tcpPortBase = 9001;
+        for (var embeddedTaskIndex = 0; embeddedTaskIndex < tasks.Count; embeddedTaskIndex++)
+        {
+            var task = tasks[embeddedTaskIndex];
+            files.Add(GenerateHeader(task, resolvedPlatforms[task.Name].Platform));
+            int? tcpPort = null;
+            if (crossPlatformSources.Contains(task.Name))
+            {
+                tcpPort = tcpPortBase++;
+                taskTcpPorts[task.Name] = tcpPort.Value;
+            }
+            var taskIndex = ir.Tasks.ToList().FindIndex(candidate =>
+                ReferenceEquals(candidate, task) || candidate.Name == task.Name);
+            files.Add(GenerateCppImpl(task, taskIndex, embeddedTaskIndex, resolvedPlatforms[task.Name].Device, ir.ExternTasks, ir.ExternContracts, tcpPort, structsByName));
+        }
+
+        files.Add(GenerateMain(tasks, resolvedPlatforms, taskTcpPorts, tracingEnabled));
+        if (ExternContractManifestGenerator.Generate(ir, Platform) is { } externManifest)
+            files.Add(externManifest);
+        _tracePolicy = TraceEmissionPolicy.Off;
+        _traceNarrativeId = null;
+        _traceSourceMap = null;
+        _traceTaskId = 0;
+        _traceTaskName = null;
+        return files;
+    }
+
+    private static (IRPlatform Platform, IRDevice? Device) ResolveEmbeddedPlatform(IRDocument ir, IRTask task)
+    {
+        var annotation = task.Platforms.First(platform => platform.Target == "embedded");
+        var variant = annotation.Args.FirstOrDefault(argument => argument.Key is null)?.Value switch
+        {
+            IRIdentExpr identifier => identifier.Name,
+            IRLiteralExpr { Value: IRTextValue text } => text.Value,
+            _ => null
+        };
+        var device = variant is null
+            ? null
+            : ir.Devices.FirstOrDefault(candidate => candidate.Name.Equals(variant, StringComparison.Ordinal));
+        return device is null ? (annotation, null) : (device.Platform, device);
+    }
+
+    // ─── Nagłówek per task ────────────────────────────────────────────────────
+
+    private static GeneratedFile GenerateHeader(IRTask task, IRPlatform effectivePlatform)
+    {
+        var profile = CodeGenPlatformProfiles.Resolve(effectivePlatform);
+        var sb = new StringBuilder();
+        sb.AppendLine($"// Generated by JunexisLang compiler — @embedded task {task.Name}");
+        sb.AppendLine("#pragma once");
+        sb.AppendLine("#include <junexis/runtime.h>");
+        sb.AppendLine("#include \"junexis_types.h\"");
+        sb.AppendLine();
+
+        var paramList = string.Join(", ", task.Params
+            .Select(p => $"{TypeMappings.ToCpp(p.Type)} {p.Name}"));
+
+        var outType = task.OutputType is not null
+            ? TypeMappings.ToCpp(task.OutputType)
+            : "void";
+
+        sb.AppendLine($"/// @brief JunexisLang task: {task.Name}");
+        sb.AppendLine($"struct {task.Name}_PlatformProfile {{");
+        sb.AppendLine($"    static constexpr const char* Variant = \"{profile.Variant}\";");
+        sb.AppendLine($"    static constexpr bool SupportsThreading = {(profile.SupportsThreading ? "true" : "false")};");
+        sb.AppendLine($"    static constexpr bool SupportsNetworking = {(profile.SupportsNetworking ? "true" : "false")};");
+        sb.AppendLine($"    static constexpr bool SupportsFileIO = {(profile.SupportsFileIO ? "true" : "false")};");
+        sb.AppendLine($"    static constexpr auto MaxMemoryBytes = {profile.MaxMemoryBytes};");
+        sb.AppendLine("};");
+        sb.AppendLine();
+        sb.AppendLine($"{outType} task_{task.Name}({paramList});");
+
+        if (task.States.Count > 0)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"/// State for task {task.Name}");
+            sb.AppendLine($"struct {task.Name}_State {{");
+            foreach (var s in task.States)
+                sb.AppendLine($"    {TypeMappings.ToCpp(s.Type)} {s.Name};");
+            sb.AppendLine("};");
+        }
+
+        return new GeneratedFile("embedded", $"embedded/{task.Name}.h", sb.ToString());
+    }
+
+    // ─── Arduino app adapter ─────────────────────────────────────────────────
+
+    private static GeneratedFile GenerateMain(
+        List<IRTask> tasks,
+        IReadOnlyDictionary<string, (IRPlatform Platform, IRDevice? Device)> resolvedPlatforms,
+        Dictionary<string, int>? taskTcpPorts = null,
+        bool tracingEnabled = false)
+    {
+        var profile = CodeGenPlatformProfiles.Resolve(resolvedPlatforms[tasks[0].Name].Platform);
+        var sb = new StringBuilder();
+        sb.AppendLine("// Generated by JunexisLang compiler \u2014 @embedded entry point");
+        var threading2 = profile.SupportsThreading ? "on" : "off";
+        var networking2 = profile.SupportsNetworking ? "on" : "off";
+        var fileio2 = profile.SupportsFileIO ? "on" : "off";
+        sb.AppendLine($"// Profile: {profile.Platform}/{profile.Variant} | threading={threading2} networking={networking2} fileIO={fileio2} memory={CodeGenPlatformProfiles.FormatBytes(profile.MaxMemoryBytes)}");
+        sb.AppendLine("#include <Arduino.h>");
+        sb.AppendLine("#include <junexis/runtime.h>");
+        sb.AppendLine("#include \"junexis_config.h\"");
+        if (profile.SupportsNetworking)
+            sb.AppendLine("#include <WiFi.h>");
+        if (profile.SupportsFileIO)
+            sb.AppendLine("#include <LittleFS.h>");
+        if (profile.SupportsThreading)
+            sb.AppendLine("#include <freertos/FreeRTOS.h>");
+        foreach (var t in tasks)
+            sb.AppendLine($"#include \"{t.Name}.h\"");
+
+        sb.AppendLine();
+        EmitCapabilityHelpers(sb, profile, tasks);
+        sb.AppendLine();
+        sb.AppendLine("void setup() {");
+        sb.AppendLine("    Serial.begin(115200);");
+        if (tracingEnabled)
+            sb.AppendLine("    junexis::install_default_trace_transport();");
+        if (profile.SupportsNetworking)
+            sb.AppendLine("    setupPlatformNetworking();");
+
+        if (profile.SupportsFileIO)
+            sb.AppendLine("    setupPlatformFileIO();");
+
+        if (profile.SupportsThreading)
+            sb.AppendLine("    setupPlatformThreading();");
+
+        foreach (var t in tasks)
+        {
+            var args = string.Join(", ", t.Params.Select(p => $"/* {p.Name} */"));
+            sb.AppendLine($"    // task_{t.Name}({args});");
+        }
+        sb.AppendLine("}");
+        sb.AppendLine();
+        sb.AppendLine("void loop() {");
+        foreach (var t in tasks)
+        {
+            var variant = CodeGenPlatformProfiles.Resolve(resolvedPlatforms[t.Name].Platform).Variant;
+            if (profile.SupportsThreading)
+                continue;
+            if (t.Params.Count == 0)
+                sb.AppendLine($"    task_{t.Name}(); // variant: {variant}");
+            else
+                sb.AppendLine($"    // task_{t.Name} requires pipeline inputs and is not started directly.");
+        }
+        if (profile.SupportsThreading)
+            sb.AppendLine("    vTaskDelay(pdMS_TO_TICKS(1000));");
+        sb.AppendLine("}");
+
+        return new GeneratedFile("embedded", "embedded/junexis_app.cpp", sb.ToString());
+    }
+
+    private static void EmitCapabilityHelpers(StringBuilder sb, PlatformCapabilities profile, List<IRTask> tasks)
+    {
+        if (profile.SupportsNetworking)
+        {
+            sb.AppendLine("static void setupPlatformNetworking() {");
+            sb.AppendLine("    // Networking bootstrap enabled by platform profile.");
+            sb.AppendLine("    // Fill in kWifiSsid / kWifiPass before flashing.");
+            sb.AppendLine("    static constexpr const char* kWifiSsid = \"YOUR_SSID\";");
+            sb.AppendLine("    static constexpr const char* kWifiPass = \"YOUR_PASSWORD\";");
+            sb.AppendLine("    WiFi.begin(kWifiSsid, kWifiPass);");
+            sb.AppendLine("    while (WiFi.waitForConnectResult() != WL_CONNECTED) {");
+            sb.AppendLine("        Serial.println(\"WiFi connecting...\");");
+            sb.AppendLine("        delay(2000);");
+            sb.AppendLine("    }");
+            sb.AppendLine("}");
+            sb.AppendLine();
+        }
+
+        if (profile.SupportsFileIO)
+        {
+            sb.AppendLine("static void setupPlatformFileIO() {");
+            sb.AppendLine("    // File I/O bootstrap enabled by platform profile.");
+            sb.AppendLine("    if (!LittleFS.begin(true)) {");
+            sb.AppendLine("        Serial.println(\"LittleFS mount failed.\");");
+            sb.AppendLine("    }");
+            sb.AppendLine("}");
+            sb.AppendLine();
+        }
+
+        if (profile.SupportsThreading)
+        {
+            sb.AppendLine("static void setupPlatformThreading() {");
+            sb.AppendLine("    // Threading bootstrap enabled by platform profile.");
+            foreach (var task in tasks)
+            {
+                if (task.Params.Count > 0)
+                {
+                    sb.AppendLine($"    // {task.Name} waits for generated pipeline input wiring.");
+                    continue;
+                }
+                sb.AppendLine($"    static TaskHandle_t task_{task.Name}_Handle = nullptr;");
+                sb.AppendLine($"    xTaskCreate([](void*) {{ for (;;) {{ task_{task.Name}(); }} }}, \"{task.Name}\", 4096, nullptr, 1, &task_{task.Name}_Handle);");
+            }
+            sb.AppendLine("}");
+        }
+    }
+
+    // ─── .cpp implementation per task ────────────────────────────────────────
+
+    private static GeneratedFile GenerateCppImpl(
+        IRTask task,
+        int taskIndex,
+        int embeddedTaskIndex,
+        IRDevice? device,
+        IReadOnlyList<IRExternTask> externTasks,
+        IReadOnlyList<IRExternContract> externContracts,
+        int? tcpPort = null,
+        Dictionary<string, IRStruct>? structs = null)
+    {
+        _traceTaskId = (uint)(taskIndex >= 0 ? taskIndex + 1 : embeddedTaskIndex + 1);
+        _traceTaskName = task.Name;
+        var sb = new StringBuilder();
+        sb.AppendLine($"// Generated by JunexisLang compiler \u2014 @embedded task {task.Name}");
+        sb.AppendLine($"#include \"{task.Name}.h\"");
+        sb.AppendLine("#include \"junexis_config.h\"");
+        sb.AppendLine("#include <string>");
+        foreach (var include in NativeFields(device?.Native, task.Native, "include"))
+            sb.AppendLine($"#include <{include}>");
+        if (tcpPort.HasValue)
+        {
+            sb.AppendLine("#include <WiFiClient.h>");
+            sb.AppendLine("#include <ArduinoJson.h>");
+        }
+        sb.AppendLine();
+        var externalCalls = CollectExternalCalls(task)
+            .Where(name => externTasks.Any(external => external.Name == name))
+            .ToList();
+        var userOwnedExterns = externContracts
+            .Where(contract =>
+                contract.Target?.Equals("embedded", StringComparison.OrdinalIgnoreCase) == true &&
+                !string.IsNullOrWhiteSpace(contract.UserFile))
+            .SelectMany(contract => contract.Functions.Select(function => $"{contract.Name}_{function.Name}"))
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var externalCall in externalCalls)
+        {
+            var declaration = externTasks.First(external => external.Name == externalCall);
+
+            var parameters = string.Join(", ", declaration.Params.Select(parameter =>
+                $"{TypeMappings.ToCpp(parameter.Type)} {parameter.Name}"));
+            var returnType = declaration.OutputType is null ? "void" : TypeMappings.ToCpp(declaration.OutputType);
+            if (userOwnedExterns.Contains(externalCall))
+            {
+                sb.AppendLine($"{returnType} {externalCall}({parameters});");
+                continue;
+            }
+
+            var body = declaration.OutputType is null ? string.Empty : " return {};";
+            sb.AppendLine($"static {returnType} {externalCall}({parameters}) {{{body} }}");
+        }
+        if (externalCalls.Count > 0)
+            sb.AppendLine();
+        if (task.Config is { Fields.Count: > 0 } config)
+        {
+            sb.AppendLine($"struct {task.Name}_Config {{");
+            foreach (var field in config.Fields)
+                sb.AppendLine($"    {TypeMappings.ToCpp(field.Type)} {field.Name};");
+            sb.AppendLine("};");
+            sb.AppendLine($"static const {task.Name}_Config config{{");
+            foreach (var field in config.Fields)
+            {
+                var value = field.Default is null ? EmitZeroValue(field.Type) : EmitExpr(field.Default);
+                sb.AppendLine($"    .{field.Name} = {value},");
+            }
+            sb.AppendLine("};");
+            sb.AppendLine();
+        }
+        if (tcpPort.HasValue)
+        {
+            // Generate junexis_serialize_to_json for the output struct
+            if (task.OutputType is IRCommType { Element: IRNamedType { Name: var structName } }
+                && structs is not null
+                && structs.TryGetValue(structName, out var outStruct))
+            {
+                sb.AppendLine($"// JSON serializer for {structName} — used by TCP bridge macro");
+                sb.AppendLine($"static void junexis_serialize_to_json(JsonObject& obj, const {structName}& val) {{");
+                foreach (var field in outStruct.Fields)
+                    sb.AppendLine($"    obj[\"{field.Name.ToLower()}\"] = val.{field.Name};");
+                sb.AppendLine($"    obj[\"_ts_us\"] = (uint64_t)micros(); // send-timestamp for latency measurement");
+                sb.AppendLine($"}}");
+                sb.AppendLine();
+            }
+            sb.AppendLine($"// TCP sender: sends output to @server via port {tcpPort.Value}");
+            sb.AppendLine($"// Protocol: [4-byte length big-endian][JSON payload][newline]");
+            sb.AppendLine($"// Reconnection: exponential backoff 1s -> 2s -> 4s -> ... -> 30s");
+            sb.AppendLine($"static WiFiClient junexis_tcp_client_{task.Name};");
+            sb.AppendLine($"static bool junexis_tcp_connected_{task.Name} = false;");
+            sb.AppendLine($"static uint32_t junexis_tcp_backoff_{task.Name} = 1000; // ms");
+            sb.AppendLine($"static uint32_t junexis_tcp_next_retry_{task.Name} = 0;");
+            sb.AppendLine($"static bool junexis_tcp_connect_{task.Name}() {{");
+            sb.AppendLine($"    if (junexis_tcp_connected_{task.Name}) return true;");
+            sb.AppendLine($"    uint32_t now = millis();");
+            sb.AppendLine($"    if (now < junexis_tcp_next_retry_{task.Name}) return false;");
+            sb.AppendLine($"    if (junexis_tcp_client_{task.Name}.connect(SERVER_HOST, {tcpPort.Value})) {{");
+            sb.AppendLine($"        junexis_tcp_connected_{task.Name} = true;");
+            sb.AppendLine($"        junexis_tcp_backoff_{task.Name} = 1000;");
+            sb.AppendLine($"        Serial.println(\"[bridge] TCP connected {task.Name} -> server:{tcpPort.Value}\");");
+            sb.AppendLine($"        return true;");
+            sb.AppendLine($"    }}");
+            sb.AppendLine($"    Serial.printf(\"[bridge] TCP connect failed, retry in %lums\\n\", junexis_tcp_backoff_{task.Name});");
+            sb.AppendLine($"    junexis_tcp_next_retry_{task.Name} = now + junexis_tcp_backoff_{task.Name};");
+            sb.AppendLine($"    junexis_tcp_backoff_{task.Name} = std::min<uint32_t>(junexis_tcp_backoff_{task.Name} * 2u, 30000u);");
+            sb.AppendLine($"    return false;");
+            sb.AppendLine($"}}");
+            sb.AppendLine($"static void junexis_tcp_send_{task.Name}(const String& json) {{");
+            sb.AppendLine($"    if (!junexis_tcp_connect_{task.Name}()) return;");
+            sb.AppendLine($"    uint32_t len = json.length();");
+            sb.AppendLine($"    uint8_t lenBuf[4] = {{ (uint8_t)(len>>24), (uint8_t)(len>>16), (uint8_t)(len>>8), (uint8_t)len }};");
+            sb.AppendLine($"    if (junexis_tcp_client_{task.Name}.write(lenBuf, 4) != 4 ||");
+            sb.AppendLine($"        junexis_tcp_client_{task.Name}.print(json) == 0 ||");
+            sb.AppendLine($"        junexis_tcp_client_{task.Name}.write('\\n') != 1) {{");
+            sb.AppendLine($"        Serial.println(\"[bridge] TCP send failed, will reconnect\");");
+            sb.AppendLine($"        junexis_tcp_client_{task.Name}.stop();");
+            sb.AppendLine($"        junexis_tcp_connected_{task.Name} = false;");
+            sb.AppendLine($"    }}");
+            sb.AppendLine($"}}");
+            sb.AppendLine();
+            // Redirect junexis_output_send to TCP sender via macro
+            sb.AppendLine($"// Redirect output sends to TCP transport");
+            sb.AppendLine($"#define junexis_output_send(val) do {{ \\");
+            sb.AppendLine($"    StaticJsonDocument<512> _doc; \\");
+            sb.AppendLine($"    auto _obj = _doc.to<JsonObject>(); \\");
+            sb.AppendLine($"    junexis_serialize_to_json(_obj, val); \\");
+            sb.AppendLine($"    String _json; serializeJson(_doc, _json); \\");
+            sb.AppendLine($"    junexis_tcp_send_{task.Name}(_json); \\");
+            sb.AppendLine($"}} while(0)");
+            sb.AppendLine();
+        }
+
+        var paramList = string.Join(", ", task.Params
+            .Select(p => $"{TypeMappings.ToCpp(p.Type)} {p.Name}"));
+
+        var outType = task.OutputType is not null
+            ? TypeMappings.ToCpp(task.OutputType)
+            : "void";
+
+        sb.AppendLine($"{outType} task_{task.Name}({paramList}) {{");
+        EmitTaskBoundaryTrace(sb, task, taskIndex, embeddedTaskIndex);
+
+        if (task.Config is { Fields.Count: > 0 } taskConfig)
+        {
+            foreach (var field in taskConfig.Fields)
+                sb.AppendLine($"    const auto& {field.Name} = config.{field.Name};");
+            sb.AppendLine();
+        }
+
+        foreach (var s in task.States)
+        {
+            var initVal = s.Init is not null ? EmitExpr(s.Init) : EmitZeroValue(s.Type);
+            sb.AppendLine($"    static {TypeMappings.ToCpp(s.Type)} {s.Name}{{{initVal}}};");
+        }
+        if (task.States.Count > 0) sb.AppendLine();
+
+        _currentTaskScope = task.Params.ToDictionary(parameter => parameter.Name, parameter => parameter.Type, StringComparer.Ordinal);
+        _queueAckBindings = new Dictionary<string, QueueAckBinding>(StringComparer.Ordinal);
+        EmitStatements(sb, task.Body, 1, task.OutputType, taskIndex >= 0 ? $"/Tasks[{taskIndex}]/Body" : null);
+        _currentTaskScope = null;
+        _queueAckBindings = null;
+        if (task.OutputType is not null)
+            sb.AppendLine("    return {};");
+
+        sb.AppendLine("}");
+        return new GeneratedFile("embedded", $"embedded/{task.Name}.cpp", sb.ToString());
+    }
+
+    private static GeneratedFile GenerateTypes(IRDocument ir)
+    {
+        var sb = new StringBuilder();
+        sb.AppendLine("// Generated Junexis shared types for @embedded.");
+        sb.AppendLine("#pragma once");
+        sb.AppendLine("#include <cstdint>");
+        sb.AppendLine("#include <string>");
+        sb.AppendLine("#include <variant>");
+        sb.AppendLine("#include <vector>");
+        sb.AppendLine();
+        sb.AppendLine("using Time = int64_t;");
+        sb.AppendLine("using Duration = int64_t;");
+        sb.AppendLine();
+        foreach (var @enum in ir.Enums)
+        {
+            sb.AppendLine($"enum class {@enum.Name} {{");
+            foreach (var variant in @enum.Variants)
+                sb.AppendLine($"    {variant.Name},");
+            sb.AppendLine("};");
+            sb.AppendLine();
+        }
+        foreach (var structure in ir.Structs)
+        {
+            sb.AppendLine($"struct {structure.Name} {{");
+            foreach (var field in structure.Fields)
+                sb.AppendLine($"    {TypeMappings.ToCpp(field.Type)} {field.Name};");
+            sb.AppendLine("};");
+            sb.AppendLine();
+        }
+        return new GeneratedFile("embedded", "embedded/junexis_types.h", sb.ToString());
+    }
+
+    private static GeneratedFile GenerateRuntimeHeader(bool tracingEnabled)
+    {
+        var content = """
+        // Generated bootstrap runtime contract for @embedded.
+        #pragma once
+        #include <Arduino.h>
+        #include <condition_variable>
+        #include <cstdint>
+        #include <deque>
+        #include <memory>
+        #include <mutex>
+        #include <optional>
+        #include <string>
+        #include <utility>
+
+        namespace junexis {
+        template <typename T> class Channel {
+        public:
+            explicit Channel(size_t capacity = 1) : state_(std::make_shared<State>(capacity)) {}
+            void send(const T& value) {
+                std::unique_lock<std::mutex> lock(state_->mutex);
+                state_->writable.wait(lock, [this] { return state_->values.size() < state_->capacity; });
+                state_->values.push_back(value);
+                state_->readable.notify_one();
+            }
+            T recv() {
+                std::unique_lock<std::mutex> lock(state_->mutex);
+                state_->readable.wait(lock, [this] { return !state_->values.empty(); });
+                auto value = state_->values.front();
+                state_->values.pop_front();
+                state_->writable.notify_one();
+                return value;
+            }
+        private:
+            struct State {
+                explicit State(size_t requestedCapacity) : capacity(requestedCapacity == 0 ? 1 : requestedCapacity) {}
+                size_t capacity;
+                std::deque<T> values;
+                std::mutex mutex;
+                std::condition_variable readable;
+                std::condition_variable writable;
+            };
+            std::shared_ptr<State> state_;
+        public:
+            auto begin() { return state_->values.begin(); }
+            auto end() { return state_->values.end(); }
+        };
+
+        template <typename T> class Queue {
+        public:
+            struct Delivery {
+                bool ok;
+                std::string message_id;
+                T value;
+            };
+            void send(const T& value) {
+                ++next_id_;
+                ids_.push_back(std::to_string(next_id_));
+                values.push_back(value);
+            }
+            void enqueue(const T& value) { send(value); }
+            T recv() const { return values.front(); }
+            Delivery delivery() const {
+                if (values.empty()) return {false, "", T{}};
+                return {true, ids_.front(), values.front()};
+            }
+            void ack(const std::string& message_id) {
+                if (!ids_.empty() && ids_.front() == message_id) {
+                    ids_.pop_front();
+                    values.pop_front();
+                }
+            }
+            void nack(const std::string& message_id, const std::string&) {
+                (void)message_id;
+            }
+            auto begin() { return values.begin(); }
+            auto end() { return values.end(); }
+        private:
+            uint64_t next_id_ = 0;
+            std::deque<std::string> ids_;
+            std::deque<T> values;
+        };
+
+        template <typename T> class Stream {
+        private:
+            struct State {
+                std::mutex mutex;
+                std::deque<T> values;
+                uint64_t version = 0;
+            };
+        public:
+            class Subscription {
+            public:
+                Subscription(std::shared_ptr<State> state, uint64_t seen) : state_(std::move(state)), seen_(seen) {}
+                std::optional<T> poll() {
+                    std::lock_guard<std::mutex> lock(state_->mutex);
+                    if (state_->version <= seen_ || state_->values.empty()) return std::nullopt;
+                    seen_ = state_->version;
+                    return state_->values.front();
+                }
+            private:
+                std::shared_ptr<State> state_;
+                uint64_t seen_;
+            };
+            Stream() : state_(std::make_shared<State>()) {}
+            void send(const T& value) { publish(value); }
+            void publish(const T& value) {
+                std::lock_guard<std::mutex> lock(state_->mutex);
+                state_->values.clear();
+                state_->values.push_back(value);
+                ++state_->version;
+            }
+            T recv() const { std::lock_guard<std::mutex> lock(state_->mutex); return state_->values.front(); }
+            Subscription subscribe() const {
+                std::lock_guard<std::mutex> lock(state_->mutex);
+                return Subscription(state_, state_->version);
+            }
+            auto begin() { return state_->values.begin(); }
+            auto end() { return state_->values.end(); }
+        private:
+            std::shared_ptr<State> state_;
+        };
+        }
+
+        template <typename Target, typename Value>
+        inline void junexis_send(Target& target, Value&& value) { target.send(std::forward<Value>(value)); }
+
+        template <typename Target>
+        inline auto junexis_recv(Target& target) { return target.recv(); }
+
+        template <typename Value>
+        inline void junexis_output_send(Value&&) {}
+
+        inline String junexis_to_string(const std::string& value) { return String(value.c_str()); }
+        inline String junexis_to_string(const char* value) { return String(value); }
+        template <typename Value>
+        inline String junexis_to_string(const Value& value) { return String(value); }
+
+        inline int64_t now() { return static_cast<int64_t>(millis()); }
+        inline int64_t epoch() { return 0; }
+        """;
+
+        if (!tracingEnabled)
+            return new GeneratedFile("embedded", "embedded/junexis/runtime.h", content);
+
+        var sb = new StringBuilder(content);
+        sb.AppendLine();
+        sb.AppendLine("namespace junexis {");
+        sb.AppendLine($"inline constexpr const char* trace_event_model = \"{TraceRuntimeContract.EventModel}\";");
+        sb.AppendLine($"inline constexpr const char* trace_url_setting = \"{TraceRuntimeContract.TraceUrlEnvironmentVariable}\";");
+        sb.AppendLine($"inline constexpr const char* trace_build_id_setting = \"{TraceRuntimeContract.BuildIdEnvironmentVariable}\";");
+        sb.AppendLine($"inline constexpr const char* trace_bundle_id_setting = \"{TraceRuntimeContract.BundleIdEnvironmentVariable}\";");
+        sb.AppendLine();
+        sb.AppendLine("struct TraceAttributes {");
+        sb.AppendLine("    std::string narrative_id;");
+        sb.AppendLine("    std::string payload_hash;");
+        sb.AppendLine("    std::string type;");
+        sb.AppendLine("    std::string build_id;");
+        sb.AppendLine("    std::string bundle_id;");
+        sb.AppendLine("};");
+        sb.AppendLine();
+        sb.AppendLine("struct TraceEvent {");
+        sb.AppendLine("    uint32_t task_id;");
+        sb.AppendLine("    std::string kind;");
+        sb.AppendLine("    int64_t lamport_clock;");
+        sb.AppendLine("    std::string file;");
+        sb.AppendLine("    int line;");
+        sb.AppendLine("    std::string function;");
+        sb.AppendLine("    TraceAttributes attributes;");
+        sb.AppendLine("};");
+        sb.AppendLine();
+        sb.AppendLine("using TraceSink = uint64_t (*)(const TraceEvent&);");
+        sb.AppendLine("inline TraceSink& trace_sink() { static TraceSink sink = nullptr; return sink; }");
+        sb.AppendLine("inline void set_trace_sink(TraceSink sink) { trace_sink() = sink; }");
+        sb.AppendLine("inline const char* trace_build_id() {");
+        sb.AppendLine($"#if defined({TraceRuntimeContract.BuildIdEnvironmentVariable})");
+        sb.AppendLine($"    return {TraceRuntimeContract.BuildIdEnvironmentVariable};");
+        sb.AppendLine("#else");
+        sb.AppendLine("    return \"\";");
+        sb.AppendLine("#endif");
+        sb.AppendLine("}");
+        sb.AppendLine();
+        sb.AppendLine("inline const char* trace_bundle_id() {");
+        sb.AppendLine($"#if defined({TraceRuntimeContract.BundleIdEnvironmentVariable})");
+        sb.AppendLine($"    return {TraceRuntimeContract.BundleIdEnvironmentVariable};");
+        sb.AppendLine("#else");
+        sb.AppendLine("    return \"\";");
+        sb.AppendLine("#endif");
+        sb.AppendLine("}");
+        sb.AppendLine();
+        sb.AppendLine("inline uint64_t emit_trace(");
+        sb.AppendLine("    const char* kind, uint32_t task_id, const char* file, int line,");
+        sb.AppendLine("    const char* function, const char* narrative_id,");
+        sb.AppendLine("    std::string payload_hash, const char* type) {");
+        sb.AppendLine("    const TraceEvent event{");
+        sb.AppendLine("        task_id, kind, 0, file, line, function,");
+        sb.AppendLine("        {narrative_id, std::move(payload_hash), type, trace_build_id(), trace_bundle_id()}");
+        sb.AppendLine("    };");
+        sb.AppendLine("    const auto sink = trace_sink();");
+        sb.AppendLine("    return sink == nullptr ? 0 : sink(event);");
+        sb.AppendLine("}");
+        sb.AppendLine();
+        sb.AppendLine("void install_default_trace_transport();");
+        sb.AppendLine("}");
+
+        return new GeneratedFile("embedded", "embedded/junexis/runtime.h", sb.ToString());
+    }
+
+    private static GeneratedFile GenerateTraceTransport() => new(
+        "embedded",
+        "embedded/junexis_trace.cpp",
+        $$"""
+        // Generated TraceCollector adapter for @embedded.
+        #include <junexis/runtime.h>
+
+        #if defined(ARDUINO_ARCH_ESP32) && defined({{TraceRuntimeContract.TraceUrlEnvironmentVariable}})
+        #include <ArduinoJson.h>
+        #include <HTTPClient.h>
+
+        namespace {
+        void junexis_debug_gate(uint64_t event_id) {
+            if (event_id == 0) return;
+            for (;;) {
+                HTTPClient http;
+                http.setTimeout(2000);
+                if (!http.begin(String({{TraceRuntimeContract.TraceUrlEnvironmentVariable}}) + "{{TraceRuntimeContract.DebugSessionPath}}")) return;
+                const int status = http.GET();
+                if (status < 200 || status >= 300) { http.end(); return; }
+                StaticJsonDocument<256> response;
+                const auto error = deserializeJson(response, http.getString());
+                http.end();
+                if (error || String(response["status"] | "").equalsIgnoreCase("Paused") == false) return;
+                delay(250);
+            }
+        }
+
+        uint64_t junexis_http_trace_sink(const junexis::TraceEvent& event) {
+            StaticJsonDocument<1024> document;
+            document["taskId"] = event.task_id;
+            document["kind"] = event.kind;
+            document["lamportClock"] = event.lamport_clock;
+            document["file"] = event.file;
+            document["line"] = event.line;
+            document["function"] = event.function;
+            JsonObject attributes = document.createNestedObject("attributes");
+            attributes["{{TraceRuntimeContract.NarrativeIdAttribute}}"] = event.attributes.narrative_id;
+            attributes["{{TraceRuntimeContract.PayloadHashAttribute}}"] = event.attributes.payload_hash;
+            attributes["{{TraceRuntimeContract.PayloadTypeAttribute}}"] = event.attributes.type;
+            if (!event.attributes.build_id.empty())
+                attributes["{{TraceRuntimeContract.BuildIdAttribute}}"] = event.attributes.build_id;
+            if (!event.attributes.bundle_id.empty())
+                attributes["{{TraceRuntimeContract.BundleIdAttribute}}"] = event.attributes.bundle_id;
+
+            String body;
+            serializeJson(document, body);
+            HTTPClient http;
+            http.setTimeout(2000);
+            if (!http.begin(String({{TraceRuntimeContract.TraceUrlEnvironmentVariable}}) + "{{TraceRuntimeContract.EventsPath}}")) return 0;
+            http.addHeader("Content-Type", "application/json");
+            const int status = http.POST(body);
+            if (status < 200 || status >= 300) { http.end(); return 0; }
+            StaticJsonDocument<256> response;
+            const auto error = deserializeJson(response, http.getString());
+            http.end();
+            if (error || response["sampled"] == false) return 0;
+            const uint64_t event_id = response["event"]["eventId"] | 0;
+            junexis_debug_gate(event_id);
+            return event_id;
+        }
+        }
+        #endif
+
+        namespace junexis {
+        void install_default_trace_transport() {
+        #if defined(ARDUINO_ARCH_ESP32) && defined({{TraceRuntimeContract.TraceUrlEnvironmentVariable}})
+            set_trace_sink(junexis_http_trace_sink);
+        #endif
+        }
+        }
+        """);
+
+    private static GeneratedFile GenerateConfigHeader() => new(
+        "embedded",
+        "embedded/junexis_config.h",
+        """
+        // Generated cross-platform bootstrap configuration.
+        #pragma once
+        #ifndef SERVER_HOST
+        #define SERVER_HOST "192.168.1.100"
+        #endif
+        """);
+
+    private static GeneratedFile GeneratePlatformIo(
+        IRDocument ir,
+        IReadOnlyList<IRTask> tasks,
+        IReadOnlyDictionary<string, (IRPlatform Platform, IRDevice? Device)> resolvedPlatforms,
+        bool needsArduinoJson)
+    {
+        var variant = CodeGenPlatformProfiles.Resolve(resolvedPlatforms[tasks[0].Name].Platform).Variant;
+        var board = variant.ToLowerInvariant() switch
+        {
+            "esp32c3" => "esp32-c3-devkitm-1",
+            "esp32s3" => "esp32-s3-devkitc-1",
+            _ => "esp32dev"
+        };
+        var libraries = tasks
+            .SelectMany(task => NativeFields(resolvedPlatforms[task.Name].Device?.Native, task.Native, "library"))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (needsArduinoJson)
+            libraries.Add("bblanchon/ArduinoJson@^6.21.5");
+        var sb = new StringBuilder();
+        sb.AppendLine("; Generated by JunexisLang compiler");
+        sb.AppendLine("[platformio]");
+        sb.AppendLine("src_dir = .");
+        sb.AppendLine("include_dir = .");
+        sb.AppendLine();
+        sb.AppendLine("[env:junexis]");
+        sb.AppendLine("platform = espressif32");
+        sb.AppendLine($"board = {board}");
+        sb.AppendLine("framework = arduino");
+        sb.AppendLine("build_unflags = -std=gnu++11 -std=gnu++14 -std=gnu++17");
+        sb.AppendLine("build_flags = -std=gnu++2a -I.");
+        if (libraries.Count > 0)
+        {
+            sb.AppendLine("lib_deps =");
+            foreach (var library in libraries)
+                sb.AppendLine($"    {library}");
+        }
+        return new GeneratedFile("embedded", "embedded/platformio.ini", sb.ToString());
+    }
+
+    private static IEnumerable<string> NativeFields(IRNativeSection? device, IRNativeSection? task, string key) =>
+        new[] { device, task }
+            .Where(section => section is not null)
+            .SelectMany(section => section!.Languages)
+            .Where(language => language.Name.Equals("cpp", StringComparison.OrdinalIgnoreCase) ||
+                               language.Name.Equals("c++", StringComparison.OrdinalIgnoreCase))
+            .SelectMany(language => language.Fields)
+            .Where(field => field.Key.Equals(key, StringComparison.OrdinalIgnoreCase))
+            .Select(field => NormalizeNativeField(field.Value));
+
+    private static string NormalizeNativeField(string value)
+    {
+        var normalized = value.Trim().Trim('\"', '\'');
+        return normalized.Replace(
+            "adafruit/DHT-sensor-library",
+            "adafruit/DHT sensor library",
+            StringComparison.OrdinalIgnoreCase)
+            .Replace(
+                "adafruit/Adafruit_SSD1306",
+                "adafruit/Adafruit SSD1306",
+                StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static IReadOnlyList<string> CollectExternalCalls(IRTask task)
+    {
+        var calls = new HashSet<string>(StringComparer.Ordinal);
+        CollectCalls(task.Body, calls);
+        foreach (var hook in task.Hooks) CollectCalls(hook.Body, calls);
+        calls.RemoveWhere(name => name is "__array__" or "__json__" or "min" or "max" or "now" or "epoch");
+        return calls.OrderBy(name => name, StringComparer.Ordinal).ToList();
+    }
+
+    private static void CollectCalls(IEnumerable<IRStmt> statements, ISet<string> calls)
+    {
+        foreach (var statement in statements)
+        {
+            switch (statement)
+            {
+                case IRLetStmt let: CollectCalls(let.Init, calls); break;
+                case IRReturnStmt { Value: not null } @return: CollectCalls(@return.Value, calls); break;
+                case IRDelayStmt delay: CollectCalls(delay.Duration, calls); break;
+                case IRLogStmt log:
+                    foreach (var argument in log.Args) CollectCalls(argument, calls);
+                    break;
+                case IRSendStmt send:
+                    CollectCalls(send.Value, calls);
+                    if (send.Target is not null) CollectCalls(send.Target, calls);
+                    break;
+                case IRRecvStmt receive: CollectCalls(receive.Source, calls); break;
+                case IRRespondStmt respond: CollectCalls(respond.Value, calls); break;
+                case IRExprStmt expression: CollectCalls(expression.Expr, calls); break;
+                case IRIfStmt conditional:
+                    CollectCalls(conditional.Condition, calls);
+                    CollectCalls(conditional.Then, calls);
+                    if (conditional.Else is IRElseIf elseIf) CollectCalls([elseIf.IfStmt], calls);
+                    if (conditional.Else is IRElseBlock elseBlock) CollectCalls(elseBlock.Body, calls);
+                    break;
+                case IRForStmt forStatement:
+                    CollectCalls(forStatement.Iter, calls);
+                    CollectCalls(forStatement.Body, calls);
+                    break;
+                case IREveryStmt every:
+                    CollectCalls(every.Interval, calls);
+                    CollectCalls(every.Body, calls);
+                    break;
+                case IRLoopStmt loop: CollectCalls(loop.Body, calls); break;
+                case IRMatchStmt match:
+                    CollectCalls(match.Subject, calls);
+                    foreach (var arm in match.Arms)
+                    {
+                        CollectCalls(arm.Body, calls);
+                        if (arm.BodyExpr is not null) CollectCalls(arm.BodyExpr, calls);
+                    }
+                    break;
+            }
+        }
+    }
+
+    private static void CollectCalls(IRExpr expression, ISet<string> calls)
+    {
+        switch (expression)
+        {
+            case IRCallExpr call:
+                if (call.Callee is IRIdentExpr identifier &&
+                    !(identifier.Name.Length > 0 && char.IsUpper(identifier.Name[0]) &&
+                      call.Args.Count > 0 && call.Args.All(argument => argument.Name is not null)))
+                    calls.Add(identifier.Name);
+                else if (call.Callee is not IRIdentExpr) CollectCalls(call.Callee, calls);
+                foreach (var argument in call.Args) CollectCalls(argument.Value, calls);
+                break;
+            case IRBinaryExpr binary:
+                CollectCalls(binary.Left, calls);
+                CollectCalls(binary.Right, calls);
+                break;
+            case IRUnaryExpr unary: CollectCalls(unary.Operand, calls); break;
+            case IRFieldAccessExpr field: CollectCalls(field.Object, calls); break;
+            case IRIndexExpr index:
+                CollectCalls(index.Object, calls);
+                CollectCalls(index.Index, calls);
+                break;
+            case IRTernaryExpr ternary:
+                CollectCalls(ternary.Cond, calls);
+                CollectCalls(ternary.Then, calls);
+                CollectCalls(ternary.Else, calls);
+                break;
+            case IRClosureExpr closure: CollectCalls(closure.Body, calls); break;
+            case IRSendExpr send:
+                CollectCalls(send.Value, calls);
+                if (send.Target is not null) CollectCalls(send.Target, calls);
+                break;
+            case IRRecvExpr receive: CollectCalls(receive.Source, calls); break;
+            case IRAwaitExpr awaitExpression: CollectCalls(awaitExpression.Inner, calls); break;
+        }
+    }
+
+    // ─── Statements ──────────────────────────────────────────────────────────
+
+    [ThreadStatic] private static IReadOnlyDictionary<string, IRSourceSpan>? _traceSourceMap;
+    [ThreadStatic] private static TraceEmissionPolicy _tracePolicy;
+    [ThreadStatic] private static string? _traceNarrativeId;
+    [ThreadStatic] private static uint _traceTaskId;
+    [ThreadStatic] private static string? _traceTaskName;
+
+    private static void EmitTaskBoundaryTrace(
+        StringBuilder sb,
+        IRTask task,
+        int globalTaskIndex,
+        int embeddedTaskIndex)
+    {
+        if (!TracingEnabled())
+            return;
+
+        var source = globalTaskIndex >= 0
+            ? TraceSourceForPath($"/Tasks[{globalTaskIndex}]")
+            : null;
+        var file = EscapeCppString(source?.File ?? string.Empty);
+        var line = source?.Line ?? 0;
+        var function = EscapeCppString(task.Name);
+        var narrative = EscapeCppString(_traceNarrativeId!);
+        var boundaryIndex = globalTaskIndex >= 0 ? globalTaskIndex : embeddedTaskIndex;
+
+        if (boundaryIndex > 0)
+        {
+            sb.AppendLine(
+                $"    junexis::emit_trace(\"{TraceRuntimeContract.CommunicationReceive}\", {_traceTaskId}, \"{file}\", {line}, \"{function}\", " +
+                $"\"{narrative}\", \"startup-{boundaryIndex - 1}\", \"task-start\");");
+        }
+        sb.AppendLine(
+            $"    junexis::emit_trace(\"{TraceRuntimeContract.CommunicationSend}\", {_traceTaskId}, \"{file}\", {line}, \"{function}\", " +
+            $"\"{narrative}\", \"startup-{boundaryIndex}\", \"task-start\");");
+    }
+
+    private static bool EmitSendTrace(
+        StringBuilder sb,
+        string indent,
+        IRType? outputType,
+        string? sourcePath)
+    {
+        if (!TracingEnabled())
+            return false;
+
+        var source = sourcePath is null ? null : TraceSourceForPath(sourcePath);
+        var file = EscapeCppString(source?.File ?? string.Empty);
+        var line = source?.Line ?? 0;
+        var function = EscapeCppString(_traceTaskName ?? string.Empty);
+        var narrative = EscapeCppString(_traceNarrativeId!);
+        var payloadType = EscapeCppString(TracePayloadType(outputType));
+        sb.AppendLine(
+            $"{indent}junexis::emit_trace(\"{TraceRuntimeContract.CommunicationSend}\", {_traceTaskId}, \"{file}\", {line}, \"{function}\", " +
+            $"\"{narrative}\", std::string(\"{function}:{line}:\") + std::to_string(millis()), \"{payloadType}\");");
+        return true;
+    }
+
+    private static bool TracingEnabled() =>
+        _tracePolicy is not TraceEmissionPolicy.Off &&
+        !string.IsNullOrWhiteSpace(_traceNarrativeId) &&
+        _traceTaskId != 0;
+
+    private static IRSourceSpan? TraceSourceForPath(string path)
+    {
+        if (_traceSourceMap is null)
+            return null;
+        if (_traceSourceMap.TryGetValue(path, out var exact))
+            return exact;
+
+        return _traceSourceMap
+            .Where(entry => entry.Key.StartsWith(path, StringComparison.Ordinal))
+            .OrderBy(entry => entry.Key.Length)
+            .Select(entry => entry.Value)
+            .FirstOrDefault();
+    }
+
+    private static string TracePayloadType(IRType? outputType) => outputType switch
+    {
+        IRCommType { Element: IRNamedType named } => named.Name,
+        IRCommType { Element: var element } => TypeMappings.ToCpp(element),
+        IRNamedType named => named.Name,
+        null => "unknown",
+        _ => TypeMappings.ToCpp(outputType),
+    };
+
+    private static void EmitStatements(
+        StringBuilder sb,
+        IReadOnlyList<IRStmt> stmts,
+        int level,
+        IRType? outputType,
+        string? sourcePathPrefix = null)
+    {
+        for (var index = 0; index < stmts.Count; index++)
+            EmitStatement(sb, stmts[index], level, outputType,
+                sourcePathPrefix is null ? null : $"{sourcePathPrefix}[{index}]");
+    }
+
+    private static void EmitStatement(
+        StringBuilder sb,
+        IRStmt stmt,
+        int level,
+        IRType? outputType,
+        string? sourcePath = null)
+    {
+        var indent = new string(' ', level * 4);
+        var traceBeforeStatement = stmt is IRSendStmt && TracingEnabled();
+        if (sourcePath is not null && !traceBeforeStatement)
+            sb.AppendLine($"{indent}// junexis:source {sourcePath}");
+        switch (stmt)
+        {
+            case IRLetStmt letStmt:
+            {
+                if (TryEmitQueueReceiveLet(sb, indent, letStmt))
+                    break;
+                var kw = letStmt.Kind == "const" ? "const auto" : "auto";
+                sb.AppendLine($"{indent}{kw} {letStmt.Name} = {EmitExpr(letStmt.Init)};");
+                break;
+            }
+            case IRLogStmt logStmt:
+                sb.AppendLine($"{indent}Serial.println({EmitLogArgs(logStmt.Args)});");
+                break;
+            case IRExprStmt exprStmt:
+                if (exprStmt.Expr is IRBinaryExpr { Op: "=" or "+=" or "-=" or "*=" or "/=" or "%=" } asgn)
+                    sb.AppendLine($"{indent}{EmitExpr(asgn.Left)} {asgn.Op} {EmitExpr(asgn.Right)};");
+                else
+                    sb.AppendLine($"{indent}{EmitExpr(exprStmt.Expr)};");
+                break;
+            case IRReturnStmt returnStmt:
+                sb.AppendLine(returnStmt.Value is not null
+                    ? $"{indent}return {EmitExpr(returnStmt.Value)};"
+                    : $"{indent}return;");
+                break;
+            case IRDelayStmt delayStmt:
+                sb.AppendLine($"{indent}vTaskDelay(pdMS_TO_TICKS({EmitDurationMs(delayStmt.Duration)}));");
+                break;
+            case IRSendStmt sendStmt:
+                var traceEmitted = EmitSendTrace(sb, indent, outputType, sourcePath);
+                if (traceEmitted && sourcePath is not null)
+                    sb.AppendLine($"{indent}// junexis:source {sourcePath}");
+                if (sendStmt.Target is not null)
+                    sb.AppendLine($"{indent}junexis_send({EmitExpr(sendStmt.Target)}, {EmitExpr(sendStmt.Value)});");
+                else
+                    sb.AppendLine($"{indent}junexis_output_send(({EmitExpr(sendStmt.Value)}));");
+                // Note: when task has tcpPort, GenerateCppImpl wraps junexis_output_send via #define
+                break;
+            case IRAckStmt ackStmt:
+                EmitQueueAckNack(sb, indent, "ack", ackStmt.Message, null);
+                break;
+            case IRNackStmt nackStmt:
+                EmitQueueAckNack(sb, indent, "nack", nackStmt.Message, nackStmt.Reason);
+                break;
+            case IRIfStmt ifStmt:
+                EmitIfStatement(sb, ifStmt, level, outputType, sourcePath);
+                break;
+            case IREveryStmt everyStmt:
+                sb.AppendLine($"{indent}while (true) {{");
+                sb.AppendLine($"{indent}    vTaskDelay(pdMS_TO_TICKS({EmitDurationMs(everyStmt.Interval)}));");
+                EmitStatements(sb, everyStmt.Body, level + 1, outputType, sourcePath is null ? null : $"{sourcePath}/Body");
+                sb.AppendLine($"{indent}}}");
+                break;
+            case IRLoopStmt loopStmt:
+                sb.AppendLine($"{indent}while (true) {{");
+                EmitStatements(sb, loopStmt.Body, level + 1, outputType, sourcePath is null ? null : $"{sourcePath}/Body");
+                sb.AppendLine($"{indent}}}");
+                break;
+            case IRForStmt forStmt:
+                sb.AppendLine($"{indent}for (auto& {forStmt.Var} : {EmitExpr(forStmt.Iter)}) {{");
+                EmitStatements(sb, forStmt.Body, level + 1, outputType, sourcePath is null ? null : $"{sourcePath}/Body");
+                sb.AppendLine($"{indent}}}");
+                break;
+            case IRMatchStmt matchStmt:
+                EmitMatchStatement(sb, matchStmt, level, outputType, sourcePath);
+                break;
+            default:
+                throw new NotSupportedException($"C++ codegen does not support statement {stmt.GetType().Name}.");
+        }
+    }
+
+    private static bool TryEmitQueueReceiveLet(StringBuilder sb, string indent, IRLetStmt statement)
+    {
+        if (statement.Init is not IRRecvExpr { Source: IRIdentExpr { Name: var sourceName } })
+            return false;
+        if (_currentTaskScope is null ||
+            !_currentTaskScope.TryGetValue(sourceName, out var sourceType) ||
+            sourceType is not IRCommType { Kind: IRCommKind.Queue })
+            return false;
+
+        var frameName = $"__{statement.Name}_delivery";
+        sb.AppendLine($"{indent}auto {frameName} = {sourceName}.delivery();");
+        sb.AppendLine($"{indent}if (!{frameName}.ok) return;");
+        sb.AppendLine($"{indent}auto {statement.Name} = {frameName}.value;");
+        _queueAckBindings ??= new Dictionary<string, QueueAckBinding>(StringComparer.Ordinal);
+        _queueAckBindings[statement.Name] = new QueueAckBinding(sourceName, $"{frameName}.message_id");
+        return true;
+    }
+
+    private static void EmitQueueAckNack(
+        StringBuilder sb,
+        string indent,
+        string method,
+        IRExpr message,
+        IRExpr? reason)
+    {
+        if (message is IRIdentExpr { Name: var name } &&
+            _queueAckBindings is not null &&
+            _queueAckBindings.TryGetValue(name, out var binding))
+        {
+            if (method == "ack")
+                sb.AppendLine($"{indent}{binding.QueueExpression}.ack({binding.MessageIdExpression});");
+            else
+                sb.AppendLine($"{indent}{binding.QueueExpression}.nack({binding.MessageIdExpression}, {EmitExpr(reason ?? new IRLiteralExpr(new IRTextValue("nack")))});");
+            return;
+        }
+
+        sb.AppendLine($"{indent}// {method}: target is not bound to a queue receive in codegen");
+    }
+
+    private static void EmitIfStatement(
+        StringBuilder sb,
+        IRIfStmt ifStmt,
+        int level,
+        IRType? outputType,
+        string? sourcePath = null,
+        bool isChained = false)
+    {
+        var indent = new string(' ', level * 4);
+        var prefix = isChained ? "} else if" : "if";
+        sb.AppendLine($"{indent}{prefix} ({EmitExpr(ifStmt.Condition)}) {{");
+        EmitStatements(sb, ifStmt.Then, level + 1, outputType, sourcePath is null ? null : $"{sourcePath}/Then");
+        switch (ifStmt.Else)
+        {
+            case IRElseIf elseIf:
+                EmitIfStatement(sb, elseIf.IfStmt, level, outputType,
+                    sourcePath is null ? null : $"{sourcePath}/Else", isChained: true);
+                break;
+            case IRElseBlock elseBlock:
+                sb.AppendLine($"{indent}}} else {{");
+                EmitStatements(sb, elseBlock.Body, level + 1, outputType,
+                    sourcePath is null ? null : $"{sourcePath}/Else/Body");
+                sb.AppendLine($"{indent}}}");
+                break;
+            default:
+                sb.AppendLine($"{indent}}}");
+                break;
+        }
+    }
+
+    private static void EmitMatchStatement(
+        StringBuilder sb,
+        IRMatchStmt matchStmt,
+        int level,
+        IRType? outputType,
+        string? sourcePath = null)
+    {
+        var indent = new string(' ', level * 4);
+        var inner  = new string(' ', (level + 1) * 4);
+        sb.AppendLine($"{indent}{{");
+        sb.AppendLine($"{inner}const auto __match = {EmitExpr(matchStmt.Subject)};");
+        bool first = true;
+        for (var armIndex = 0; armIndex < matchStmt.Arms.Count; armIndex++)
+        {
+            var arm = matchStmt.Arms[armIndex];
+            var armPath = sourcePath is null ? null : $"{sourcePath}/Arms[{armIndex}]";
+            switch (arm.Pattern)
+            {
+                case IRLiteralPattern litPat:
+                    sb.AppendLine($"{inner}{(first ? "if" : "else if")} (__match == {EmitValue(litPat.Literal)}) {{");
+                    EmitArmBody(sb, arm, level + 2, outputType, armPath);
+                    sb.AppendLine($"{inner}}}");
+                    first = false;
+                    break;
+                case IRBindingPattern bp:
+                    sb.AppendLine(first ? $"{inner}{{" : $"{inner}else {{");
+                    sb.AppendLine($"{inner}    auto {bp.Name} = __match;");
+                    EmitArmBody(sb, arm, level + 2, outputType, armPath);
+                    sb.AppendLine($"{inner}}}");
+                    first = false;
+                    break;
+                case IRWildcardPattern:
+                    sb.AppendLine(first ? $"{inner}{{" : $"{inner}else {{");
+                    EmitArmBody(sb, arm, level + 2, outputType, armPath);
+                    sb.AppendLine($"{inner}}}");
+                    first = false;
+                    break;
+            }
+        }
+        sb.AppendLine($"{indent}}}");
+    }
+
+    private static void EmitArmBody(
+        StringBuilder sb,
+        IRMatchArm arm,
+        int level,
+        IRType? outputType,
+        string? sourcePath = null)
+    {
+        if (arm.Body.Count > 0)
+            EmitStatements(sb, arm.Body, level, outputType, sourcePath is null ? null : $"{sourcePath}/Body");
+        else if (arm.BodyExpr is not null)
+        {
+            var indent = new string(' ', level * 4);
+            sb.AppendLine($"{indent}{EmitExpr(arm.BodyExpr)};");
+        }
+    }
+
+    // ─── Expressions ─────────────────────────────────────────────────────────
+
+    private static string EmitExpr(IRExpr expr) => expr switch
+    {
+        IRLiteralExpr lit                                          => EmitValue(lit.Value),
+        IRIdentExpr id                                             => id.Name,
+        IRConfigAccessExpr cfg                                     => cfg.Field is not null ? $"config.{cfg.Field}" : "config",
+        IRBinaryExpr { Op: "as", Right: IRIdentExpr t } cast       => EmitCast(cast.Left, t.Name),
+        IRBinaryExpr bin                                           => $"({EmitExpr(bin.Left)} {MapBinaryOp(bin.Op)} {EmitExpr(bin.Right)})",
+        IRUnaryExpr un                                             => $"({MapUnaryOp(un.Op)}{EmitExpr(un.Operand)})",
+        IRCallExpr call                                            => EmitCall(call),
+        IRFieldAccessExpr fa                                       => $"{EmitExpr(fa.Object)}.{fa.Field}",
+        IRIndexExpr idx                                            => $"{EmitExpr(idx.Object)}[{EmitExpr(idx.Index)}]",
+        IREnumAccessExpr en                                        => $"{en.TypeName}::{en.Variant}",
+        IRTernaryExpr tern                                         => $"({EmitExpr(tern.Cond)} ? {EmitExpr(tern.Then)} : {EmitExpr(tern.Else)})",
+        IRSendExpr send                                            => send.Target is not null
+                                                                        ? $"junexis_send({EmitExpr(send.Target)}, {EmitExpr(send.Value)})"
+                                                                        : EmitExpr(send.Value),
+        IRRecvExpr recv                                            => $"junexis_recv({EmitExpr(recv.Source)})",
+        IRAwaitExpr aw                                             => EmitExpr(aw.Inner),
+        _                                                          => throw new NotSupportedException($"C++ codegen does not support expression {expr.GetType().Name}.")
+    };
+
+    private static string EmitCall(IRCallExpr callExpr)
+    {
+        if (callExpr.Callee is IRIdentExpr { Name: var castName } &&
+            callExpr.Args.Count == 1 &&
+            TryEmitNumericCast(castName, EmitExpr(callExpr.Args[0].Value), out var numericCast))
+        {
+            return numericCast;
+        }
+
+        // Struct literal: PascalCase callee + all named args → C++20 designated initializers
+        if (callExpr.Callee is IRIdentExpr { Name: var sName } &&
+            sName.Length > 0 && char.IsUpper(sName[0]) &&
+            callExpr.Args.Count > 0 &&
+            callExpr.Args.All(a => a.Name is not null))
+        {
+            var fields = string.Join(", ", callExpr.Args.Select(a => $".{a.Name} = {EmitExpr(a.Value)}"));
+            return $"{sName}{{{fields}}}";
+        }
+        var args = string.Join(", ", callExpr.Args.Select(a => EmitExpr(a.Value)));
+        return $"{EmitExpr(callExpr.Callee)}({args})";
+    }
+
+    private static bool TryEmitNumericCast(string name, string value, out string expression)
+    {
+        var cppType = name.ToLowerInvariant() switch
+        {
+            "f32" or "float32" => "float",
+            "f64" or "float64" => "double",
+            "i8" or "int8" => "int8_t",
+            "i16" or "int16" => "int16_t",
+            "i32" or "int32" => "int32_t",
+            "i64" or "int64" => "int64_t",
+            "u8" or "uint8" => "uint8_t",
+            "u16" or "uint16" => "uint16_t",
+            "u32" or "uint32" => "uint32_t",
+            "u64" or "uint64" => "uint64_t",
+            _ => string.Empty
+        };
+
+        expression = cppType.Length > 0
+            ? $"static_cast<{cppType}>({value})"
+            : string.Empty;
+        return expression.Length > 0;
+    }
+
+    private static string EmitLogArgs(IReadOnlyList<IRExpr> args)
+    {
+        if (args.Count == 1 && args[0] is IRLiteralExpr { Value: IRTextValue tv })
+        {
+            return EmitArduinoInterpolatedString(tv.Value);
+        }
+        return string.Join(" + String(\" \") + ", args.Select(argument => $"junexis_to_string({EmitExpr(argument)})"));
+    }
+
+    private static string EmitArduinoInterpolatedString(string raw)
+    {
+        var matches = InterpolationRegex.Matches(raw);
+        if (matches.Count == 0)
+            return $"\"{EscapeCppString(raw)}\"";
+
+        var parts = new List<string>();
+        var lastPosition = 0;
+        foreach (Match match in matches)
+        {
+            if (match.Index > lastPosition)
+                parts.Add($"String(\"{EscapeCppString(raw[lastPosition..match.Index])}\")");
+
+            var expression = match.Groups[1].Value.Trim();
+            var format = match.Groups[2].Success ? match.Groups[2].Value : string.Empty;
+            var precision = Regex.Match(format, @"\.(\d+)f$");
+            parts.Add(precision.Success
+                ? $"String({expression}, {precision.Groups[1].Value})"
+                : $"junexis_to_string({expression})");
+            lastPosition = match.Index + match.Length;
+        }
+
+        if (lastPosition < raw.Length)
+            parts.Add($"String(\"{EscapeCppString(raw[lastPosition..])}\")");
+        return string.Join(" + ", parts);
+    }
+
+    private static string EmitValue(IRValue value) => value switch
+    {
+        IRIntValue v   => v.Value.ToString(CultureInfo.InvariantCulture),
+        IRFloatValue v => FormatFloat(v.Value),
+        IRBoolValue v  => v.Value ? "true" : "false",
+        IRTextValue v  => $"\"{EscapeCppString(v.Value)}\"",
+        IRUnitValue v  => EmitUnitMs(v).ToString(CultureInfo.InvariantCulture),
+        IRNullValue    => "nullptr",
+        _              => "0"
+    };
+
+    private static string EmitZeroValue(IRType type) => type switch
+    {
+        IRNamedType { Name: "Int"   } => "0",
+        IRNamedType { Name: "Float" } => "0.0f",
+        IRNamedType { Name: "Bool"  } => "false",
+        IRNamedType { Name: "Text"  } => "\"\"",
+        _                             => "{}"
+    };
+
+    private static string FormatFloat(double v)
+    {
+        var s = v.ToString(CultureInfo.InvariantCulture);
+        return (s.Contains('.') || s.Contains('E')) ? s + "f" : s + ".0f";
+    }
+
+    private static long EmitUnitMs(IRUnitValue u) => u.Unit switch
+    {
+        "ms" => (long)u.Magnitude,
+        "s"  => (long)(u.Magnitude * 1_000),
+        "m"  => (long)(u.Magnitude * 60_000),
+        "h"  => (long)(u.Magnitude * 3_600_000),
+        _    => (long)u.Magnitude
+    };
+
+    private static string EmitDurationMs(IRExpr expr)
+        => expr is IRLiteralExpr { Value: IRUnitValue u }
+            ? EmitUnitMs(u).ToString(CultureInfo.InvariantCulture)
+            : EmitExpr(expr);
+
+    private static string MapBinaryOp(string op) => op switch
+    {
+        "and" => "&&",
+        "or"  => "||",
+        _     => op
+    };
+
+    private static string MapUnaryOp(string op) => op switch
+    {
+        "not" => "!",
+        _     => op
+    };
+
+    private static string EmitCast(IRExpr value, string targetType)
+    {
+        var v = EmitExpr(value);
+        return targetType switch
+        {
+            "Int"   => $"static_cast<int32_t>({v})",
+            "Float" => $"static_cast<float>({v})",
+            "Bool"  => $"static_cast<bool>({v})",
+            "Text"  => $"std::to_string({v})",
+            _       => $"static_cast<{targetType}>({v})"
+        };
+    }
+
+    private static string EscapeCppString(string s)
+        => s.Replace("\\", "\\\\", StringComparison.Ordinal)
+             .Replace("\"", "\\\"", StringComparison.Ordinal)
+             .Replace("\n", "\\n",  StringComparison.Ordinal)
+             .Replace("\r", "\\r",  StringComparison.Ordinal);
+
+    private static readonly Regex InterpolationRegex =
+        new(@"\{([^{}:]+)(?::([^{}]*))?\}", RegexOptions.Compiled);
+
+    private static IEnumerable<IRPipelineConn> FlattenConnections(IReadOnlyList<IRPipelineConn> conns)
+    {
+        foreach (var conn in conns)
+        {
+            if (conn is IRParallelBlock parallel)
+                foreach (var inner in FlattenConnections(parallel.Connections))
+                    yield return inner;
+            else
+                yield return conn;
+        }
+    }
+}

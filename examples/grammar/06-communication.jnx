@@ -1,0 +1,160 @@
+// grammar/06-communication.jnx
+// Pokrycie: sendStatement (z TO i bez), receiveStatement (RECV i RECV FROM),
+//           respondStatement, communicationExpression w expression context,
+//           loop jako nieskończona pętla, różne wzorce komunikacji
+
+struct Request {
+    id:   Int
+    body: Text
+}
+
+struct Response {
+    id:     Int
+    status: u16
+    body:   Text
+}
+
+// ─── send bez TO ─────────────────────────────────────────────────────
+task Producer() @server -> chan<Int> {
+    let i: Int = 0
+    loop {
+        send i         // sendStatement: SEND expression
+        i += 1
+    }
+}
+
+// ─── send z TO ────────────────────────────────────────────────────────
+task TargetedSender(out: chan<Text>) @server {
+    send "hello" to out   // sendStatement: SEND expression TO expression
+    send "world" to out
+}
+
+// ─── recv bez FROM ────────────────────────────────────────────────────
+task Consumer(input: chan<Int>) @server {
+    loop {
+        let v = recv input        // receiveStatement: LET id = RECV expression
+        log("received", v)
+    }
+}
+
+// ─── recv z FROM ──────────────────────────────────────────────────────
+task ConsumerFrom(input: chan<Text>) @server {
+    loop {
+        let msg = recv from input  // receiveStatement: LET id = RECV FROM expression
+        log(msg)
+    }
+}
+
+// ─── var zamiast let w receive ────────────────────────────────────────
+task MutableReceiver(ch: chan<Float>) @server {
+    loop {
+        var value = recv ch
+        value = value * 2.0
+        log(value)
+    }
+}
+
+// ─── respond ──────────────────────────────────────────────────────────
+// respond jest używane w kontekście request-reply (chan<Request> -> Response)
+task RequestHandler(requests: chan<Request>) @server {
+    loop {
+        let req = recv requests
+        respond Response {
+            id:     req.id,
+            status: 200,
+            body:   "ok"
+        }
+    }
+}
+
+// ─── communicationExpression w expression context ─────────────────────
+// recv i send mogą wystąpić wewnątrz wyrażeń (primaryExpression)
+task TransformInline(input: chan<Int>) @server -> chan<Int> {
+    loop {
+        // recv jako część wyrażenia — bez osobnego let
+        send (recv input) * 2
+    }
+}
+
+// ─── fanout: ten sam wynik wysyłany do wielu kanałów ──────────────────
+task Fanout(input: chan<Int>, a: chan<Int>, b: chan<Int>) @server {
+    loop {
+        let v = recv input
+        send v to a
+        send v to b
+    }
+}
+
+// ─── merge N kanałów w jeden ──────────────────────────────────────────
+task Merge(ch1: chan<Int>, ch2: chan<Int>) @server -> chan<Int> {
+    // Prostszy model: sekwencyjne recv — parser testuje combinację
+    loop {
+        let a = recv ch1
+        send a
+        let b = recv ch2
+        send b
+    }
+}
+
+// ─── queue z at-least-once ─────────────────────────────────────────────
+task QueueWorker(jobs: queue<Request>) @server -> chan<Response> {
+    loop {
+        let job = recv jobs
+        let result = Response { id: job.id, status: 200, body: "done" }
+        send result
+        ack job // potwierdzenie przetworzenia job
+    }
+}
+
+// ─── queue ACK/NACK z decyzją walidacyjną ─────────────────────────────
+task QueueRetryWorker(jobs: queue<Request>) @server -> chan<Response> {
+    loop {
+        let job = recv jobs
+        let valid = job.body != ""
+
+        if valid {
+            let result = Response {
+                id: job.id,
+                status: 200,
+                body: "done"
+            }
+
+            send result
+            ack job
+        } else {
+            nack job reason "empty request body"
+        }
+    }
+}
+
+// ─── queue batch snapshot bez ACK ─────────────────────────────────────
+task QueueBatchWorker(jobs: queue<Request>) @server {
+    // batch(queue<T>, Int) zwraca List<T> jako podgląd/snapshot.
+    // Nie usuwa elementów z kolejki i nie wykonuje ack/nack.
+    let pending = batch(jobs, 10)
+
+    for job in pending {
+        log("pending job", job.id)
+    }
+}
+
+// ─── stream (latest-wins) ─────────────────────────────────────────────
+task StreamConsumer(metrics: stream<Float>) @server {
+    for m in metrics {
+        log("metric", m)
+    }
+}
+
+// ─── stream latest snapshot ───────────────────────────────────────────
+task StreamLatestDashboard(metrics: stream<Float>) @report {
+    let current = latest(metrics)
+
+    if current > 80.0 {
+        log("high metric", current)
+    }
+}
+
+// ─── send struct literal inline ───────────────────────────────────────
+task InlineSend(replies: chan<Response>) @server {
+    send Response { id: 1, status: 200, body: "hello" } to replies
+}

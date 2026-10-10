@@ -1,0 +1,5 @@
+name = "smart-home-recovery-policy"
+entry = "src/main.jnx"
+targets = ["server"]
+outDir = "out"
+

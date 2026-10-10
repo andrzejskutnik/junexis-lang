@@ -1,0 +1,72 @@
+// grammar/09-pipeline.jnx
+// Pokrycie: pipelineDeclaration, pipelineConnection (USE, PARALLEL),
+//           pipelineSource/Target (IDENTIFIER i IDENTIFIER.IDENTIFIER)
+
+struct RawData    { value: Float }
+struct Processed  { value: Float; valid: Bool }
+struct Metric     { name: Text; value: Float }
+
+task Source()                                   @embedded -> chan<RawData>  { every 1s { send RawData { value: 0.0 } } }
+task Validate(input: chan<RawData>)              @server  -> chan<Processed>  { loop { let v = recv input; send Processed { value: v.value, valid: true } } }
+task Normalize(input: chan<Processed>)           @server  -> chan<Processed>  { loop { let v = recv input; send v } }
+task Enrich(input: chan<Processed>)              @server  -> chan<Metric>     { loop { let v = recv input; send Metric { name: "raw", value: v.value } } }
+task Report(input: chan<Metric>)                 @server  -> chan<Metric>     { loop { let v = recv input; send v } }
+task Store(input: chan<Metric>)                  @server                      { loop { let v = recv input; log(v.name) } }
+task Alert(input: chan<Metric>)                  @server                      { loop { let v = recv input; log("alert", v.name) } }
+task Dashboard(input: chan<Metric>)              @report                      { for m in input { log(m.name) } }
+task Aggregate(a: chan<Metric>, b: chan<Metric>) @server -> chan<Metric>      { loop { let v = recv a; send v } }
+
+// ─── pipeline liniowy ────────────────────────────────────────────────
+pipeline Linear {
+    use Source     -> Validate
+    use Validate   -> Normalize
+    use Normalize  -> Enrich
+    use Enrich     -> Dashboard
+}
+
+// ─── pipeline z member access (source.port -> target.port) ───────────
+pipeline WithPorts {
+    use Source.output    -> Validate.input
+    use Validate.output  -> Normalize.input
+    use Normalize.output -> Dashboard
+}
+
+// ─── pipeline z PARALLEL block ───────────────────────────────────────
+pipeline Parallel {
+    use Source -> Validate
+    parallel {
+        use Validate -> Report
+        use Validate -> Store
+        use Validate -> Alert
+    }
+    use Report -> Dashboard
+}
+
+// ─── pipeline z PARALLEL zagnieżdżonym ───────────────────────────────
+pipeline DeepParallel {
+    use Source -> Validate
+    parallel {
+        use Validate -> Enrich
+        parallel {
+            use Validate -> Store
+            use Validate -> Alert
+        }
+    }
+}
+
+// ─── pipeline bez połączeń (tylko deklaracja) ─────────────────────────
+pipeline Empty {
+}
+
+// ─── pipeline z USE bez ARROW (standalone task) ──────────────────────
+pipeline StandaloneUse {
+    use Source
+    use Dashboard
+}
+
+// ─── pipeline z wieloma USE do tego samego celu ───────────────────────
+pipeline MultiInput {
+    use Source   -> Aggregate
+    use Source   -> Aggregate
+    use Aggregate -> Dashboard
+}

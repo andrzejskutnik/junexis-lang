@@ -1,0 +1,238 @@
+// PRZYKŁAD 2: API e-commerce — REST + queue + multi-service
+// Demonstruje: api{}, queue semantics, multi-task @server, OpenAPI generation
+
+// ===== TYPY DANYCH =====
+// Definicje typów danych dla produktów, zamówień i zdarzeń fulfillment
+struct Product {
+    id:       u64
+    name:     Text
+    price:    Float
+    stock:    u32
+    category: Text
+}
+
+struct Order {
+    id:         u64
+    product_id: u64
+    quantity:   u32
+    user_id:    u64
+    status:     OrderStatus
+    created_at: Time
+}
+
+enum OrderStatus {
+    Pending,
+    Processing,
+    Fulfilled,
+    Cancelled(Text),
+    Failed(Text)
+}
+
+struct OrderInput {
+    product_id: u64
+    quantity:   u32
+    user_id:    u64
+}
+
+struct StockUpdate {
+    product_id: u64
+    delta:      i32          // ujemny = redukcja, dodatni = uzupełnienie
+    reason:     Text
+}
+
+struct FulfillmentEvent {
+    order_id:    u64
+    product_id:  u64
+    quantity:    u32
+    warehouse:   Text
+}
+
+extern task check_stock(product_id: u64) @server -> u32
+extern task reserve_stock(product_id: u64, quantity: u32) @server
+extern task ship_order(api: Text, event: FulfillmentEvent) @server -> Bool
+extern task render_fulfilled(order: Order) @report
+extern task render_cancelled(order: Order, reason: Text) @report
+extern task render_error(order: Order, error: Text) @report
+
+// ===== TASKS =====
+
+// Produkt API — CRUD przez REST
+// Kompilator generuje: Go net/http + OpenAPI 3.0 spec
+task ProductService() @server {
+    config {
+        db_url: Text : "postgres://localhost:5432/products"
+    }
+    // handlery REST zdefiniowane w bloku 'protocol rest' poniżej
+}
+
+// Order Service — przyjmuje zamówienia, publikuje eventy
+// Kompilator generuje: Go + AMQP publish + REST endpoint
+task OrderService(
+    stock_updates: queue<StockUpdate>     // odbiera aktualizacje stanu magazynu
+) @server -> queue<Order> {               // publikuje zamówienia do przetworzenia
+    config {
+        db_url: Text : "postgres://localhost:5432/orders"
+        max_order_qty: u32 : 100
+    }
+
+    // Obsługa aktualizacji stanu magazynu (queue — każda musi dotrzeć)
+    for update in stock_updates {
+        if update.delta < 0 {
+            log("Stock reduced: product={update.product_id}, by={update.delta}")
+        } else {
+            log("Stock replenished: product={update.product_id}, by={update.delta}")
+        }
+    }
+}
+
+// Inventory Service — zarządza stanem magazynu
+// Odbiera zamówienia, rezerwuje towar, publikuje wyniki
+// Kompilator generuje: Go, AMQP consumer (queue<Order>), database/sql (PostgreSQL), AMQP publisher (queue<FulfillmentEvent>)
+task InventoryService(
+    orders: queue<Order>                    // zamówienia do zarezerwowania towaru
+) @server -> queue<FulfillmentEvent> {     // potwierdzenia dla fulfillment
+    config {
+        db_url: Text : "postgres://localhost:5432/inventory"
+        warehouse: Text : "WAR-01"
+    }
+
+    state reserved_count: Int = 0
+
+    for order in orders {
+        match order.status {
+            OrderStatus::Pending -> {
+                let available = check_stock(order.product_id)
+                if available >= order.quantity {
+                    reserve_stock(order.product_id, order.quantity)
+                    reserved_count = reserved_count + 1
+                    send FulfillmentEvent {
+                        order_id:   order.id,
+                        product_id: order.product_id,
+                        quantity:   order.quantity,
+                        warehouse:  config.warehouse
+                    }
+                } else {
+                    log("Insufficient stock for order {order.id}: need {order.quantity}, have {available}")
+                }
+            }
+            _ -> {
+                log("Skipping order {order.id} with status {order.status}")
+            }
+        }
+    }
+}
+
+// Fulfillment Service — wysyła zamówienia i aktualizuje magazyn
+// Kompilator generuje: Go, AMQP consumer (queue<FulfillmentEvent>), net/http client (POST courier API), AMQP publisher (queue<StockUpdate>)
+task FulfillmentService(
+    events: queue<FulfillmentEvent>
+) @server -> queue<StockUpdate> {
+    config {
+        courier_api: Text : "https://api.courier.example.com"
+    }
+
+    for event in events {
+        let shipped = ship_order(config.courier_api, event)
+        if shipped {
+            send StockUpdate {
+                product_id: event.product_id,
+                delta:      0 - event.quantity as i32,   // ujemna delta: rezerwacja towaru zmniejsza stan magazynu
+                reason:     "order_fulfilled:{event.order_id}"
+            }
+        } else {
+            log("Shipping failed for order {event.order_id}")
+        }
+    }
+}
+
+// Notifications — stream alertów biznesowych do dashboardu
+// Kompilator generuje: Go, AMQP consumer (queue<Order>), filtr statusów Fulfilled/Cancelled/Failed, stream<Order> publisher (WebSocket/SSE)
+task NotificationHub(
+    orders: queue<Order>
+) @server -> stream<Order> {
+    // re-publikuje ważne zdarzenia jako stream dla dashboardu
+    for order in orders {
+        match order.status {
+            OrderStatus::Fulfilled -> {
+                send order
+            }
+            OrderStatus::Cancelled(_) -> {
+                send order
+            }
+            OrderStatus::Failed(_) -> {
+                send order
+            }
+            _ -> {
+            }
+        }
+    }
+}
+
+// Dashboard operacyjny
+// Kompilator generuje: TypeScript, WebSocket/SSE client (stream<Order>), interface Order{}, renderFulfilled()/renderCancelled()/renderError()
+task OperationsDashboard(
+    order_events: stream<Order>
+) @report {
+    for order in order_events {
+        match order.status {
+            OrderStatus::Fulfilled     -> render_fulfilled(order)
+            OrderStatus::Cancelled(r) -> render_cancelled(order, r)
+            OrderStatus::Failed(e)    -> render_error(order, e)
+            _                         -> { /* ignoruj */ }
+        }
+    }
+}
+
+// Typowane operacje powierzchni REST. Implementacja storage pozostaje granicą
+// hosta; osobne taski utrzymują protocol niezależny od usług pipeline.
+task ListProducts(page: u32, limit: u32) @server -> [Product] { }
+task GetProduct(id: u64) @server -> Product { }
+task CreateProduct(product: Product) @server -> Product { }
+task UpdateProduct(id: u64, product: Product) @server -> Product { }
+task DeleteProduct(id: u64) @server { }
+task SearchProducts(q: Text, category: Text) @server -> [Product] { }
+task CreateOrder(order: OrderInput) @server -> Order { }
+task GetOrder(id: u64) @server -> Order { }
+task ListOrders(user_id: u64, status: Text) @server -> [Order] { }
+task CancelOrder(id: u64, reason: Text) @server -> Order { }
+
+// ===== PROTOCOL BINDINGS (D7) =====
+// Per D7: task nie wie nic o protokole — binding deklarowany osobno
+
+protocol rest {
+    // ProductService — CRUD endpointów produktów
+    GET("/products",             ListProducts(query page: u32, query limit: u32))
+    GET("/products/{id: u64}",   GetProduct())
+    POST("/products",            CreateProduct(body product: Product))
+    PUT("/products/{id: u64}",   UpdateProduct(body product: Product))
+    DELETE("/products/{id: u64}",DeleteProduct())
+    GET("/products/search",      SearchProducts(query q: Text, query category: Text))
+
+    // OrderService — CRUD endpointów zamówień
+    POST("/orders",                  CreateOrder(body order: OrderInput))
+    GET("/orders/{id: u64}",         GetOrder())
+    GET("/orders",                   ListOrders(query user_id: u64, query status: Text))
+    POST("/orders/{id: u64}/cancel", CancelOrder(body reason: Text))
+}
+
+// ===== PIPELINE =====
+
+pipeline EcommerceBackend {
+    // Główny przepływ zamówień
+    use OrderService    -> InventoryService
+    use InventoryService -> FulfillmentService
+    use FulfillmentService -> OrderService   // celowy cykl: aktualizacje stanu magazynu wracają do OrderService (nie deadlock)
+
+    // Monitoring operacyjny
+    use OrderService    -> NotificationHub
+    use NotificationHub -> OperationsDashboard
+}
+
+// ===== NARRATIVE (EXPERIMENTAL) =====
+
+narrative "E-commerce Order Flow" {
+    intent "Ensure atomic order processing with inventory guarantee"
+    compliance "PCI-DSS, GDPR"
+    trace full
+    applies_to { OrderService, InventoryService, FulfillmentService, NotificationHub, OperationsDashboard }
+}

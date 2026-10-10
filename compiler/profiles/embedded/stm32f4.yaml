@@ -1,0 +1,42 @@
+# STM32F4 Platform Profile
+# ARM Cortex-M4 microcontroller (industrial grade)
+# Phase 27.5 - YAML-based platform profiles
+
+version: "1.0"
+platform: "@embedded"
+variant: "stm32f4"
+
+capabilities:
+  threading: true # RTOS multi-threading
+  fileIO: false # No file system by default
+  networking: false # No WiFi (Ethernet with external PHY)
+  async: false # No async/await on embedded
+  dynamicAllocation: true # Heap available
+  realTimeClock: true # RTC peripheral
+  hardwareInterrupts: true # NVIC interrupts
+
+limits:
+  maxMemoryBytes: 196608 # 192 KB SRAM
+  maxConcurrentTasks: 16 # RTOS tasks limit
+
+metadata:
+  description: "STM32F4 ARM Cortex-M4 microcontroller (industrial)"
+  manufacturer: "STMicroelectronics"
+  architecture: "ARM Cortex-M4"
+  frequency: "168MHz"
+  releaseYear: 2011
+
+hardware:
+  ram: "192 KB SRAM"
+  flash: "1 MB"
+
+recommended:
+  useCases:
+    - "Industrial automation"
+    - "Motor control"
+    - "Data acquisition systems"
+    - "Real-time control systems"
+  notRecommended:
+    - "WiFi/BLE applications (no wireless)"
+    - "Battery-powered devices (higher power consumption)"
+    - "Cost-sensitive consumer products"

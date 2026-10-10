@@ -1,0 +1,80 @@
+{
+  "runtimeAbi": "junexis.storage.runtime/0.1",
+  "action": "invoke",
+  "operation": "query.plan",
+  "effect": "read",
+  "requiredCapabilities": [
+    "query-plan"
+  ],
+  "input": {
+    "schemaVersion": "junexis.storage.query-invocation/0.1",
+    "model": {
+      "schemaVersion": "junexis.storage.model/0.1",
+      "name": "HomeData",
+      "entities": [
+        {
+          "name": "Observation",
+          "fields": [
+            { "name": "id", "type": "uuid", "nullable": false },
+            { "name": "homeId", "type": "uuid", "nullable": false },
+            { "name": "sensor", "type": "text", "nullable": false },
+            { "name": "value", "type": "float64", "nullable": false },
+            { "name": "recordedAt", "type": "timestamp", "nullable": false }
+          ],
+          "primaryKey": ["id"]
+        }
+      ]
+    },
+    "query": {
+      "schemaVersion": "junexis.storage.query-plan/0.1",
+      "name": "Recent",
+      "model": "HomeData",
+      "parameters": [
+        { "name": "homeId", "type": "uuid", "nullable": false }
+      ],
+      "sourceEntity": "Observation",
+      "steps": [
+        {
+          "kind": "filter",
+          "predicate": {
+            "kind": "comparison",
+            "left": { "kind": "field", "name": "homeId" },
+            "operator": "eq",
+            "right": { "kind": "parameter", "name": "homeId" }
+          }
+        },
+        {
+          "kind": "project",
+          "projections": [
+            { "name": "sensorName", "expression": { "kind": "field", "name": "sensor" } },
+            { "name": "value", "expression": { "kind": "field", "name": "value" } },
+            { "name": "recordedAt", "expression": { "kind": "field", "name": "recordedAt" } }
+          ]
+        },
+        {
+          "kind": "sort",
+          "keys": [
+            { "expression": { "kind": "field", "name": "recordedAt" }, "direction": "desc" }
+          ]
+        },
+        {
+          "kind": "limit",
+          "count": 20,
+          "offset": 0
+        }
+      ],
+      "result": [
+        { "name": "sensorName", "type": "text", "nullable": false },
+        { "name": "value", "type": "float64", "nullable": false },
+        { "name": "recordedAt", "type": "timestamp", "nullable": false }
+      ]
+    },
+    "arguments": [
+      {
+        "name": "homeId",
+        "type": "uuid",
+        "value": "aa62e761-22e6-4dce-9227-050c87e9131b"
+      }
+    ]
+  }
+}

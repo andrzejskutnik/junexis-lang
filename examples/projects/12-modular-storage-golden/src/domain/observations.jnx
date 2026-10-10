@@ -1,0 +1,22 @@
+struct HomeObservation {
+    observation_id: Text
+    room: Text
+    status: Text
+    note: Text
+    sequence: Int
+}
+
+struct SaveResult {
+    stored: Bool
+    provider: Text
+    key: Text
+}
+
+struct HomeSnapshot {
+    provider: Text
+    restored_after_restart: Bool
+    count: Int
+    latest: List<HomeObservation>
+    build_id: Text
+    bundle_id: Text
+}

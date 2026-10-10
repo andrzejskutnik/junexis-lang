@@ -1,0 +1,14 @@
+<Solution>
+  <Project Path="JunexisLang.Compiler.CLI/JunexisLang.Compiler.CLI.csproj" />
+  <Project Path="JunexisLang.Compiler.CLI.Tests/JunexisLang.Compiler.CLI.Tests.csproj" />
+  <Project Path="JunexisLang.Compiler.CodeGen.Tests/JunexisLang.Compiler.CodeGen.Tests.csproj" />
+  <Project Path="JunexisLang.Compiler.CodeGen/JunexisLang.Compiler.CodeGen.csproj" />
+  <Project Path="JunexisLang.Compiler.Core/JunexisLang.Compiler.Core.csproj" />
+  <Project Path="JunexisLang.Compiler.IR/JunexisLang.Compiler.IR.csproj" />
+  <Project Path="JunexisLang.Compiler.LspHost/JunexisLang.Compiler.LspHost.csproj" />
+  <Project Path="JunexisLang.Compiler.LspHost.Tests/JunexisLang.Compiler.LspHost.Tests.csproj" />
+  <Project Path="JunexisLang.Compiler.Narrative/JunexisLang.Compiler.Narrative.csproj" />
+  <Project Path="JunexisLang.Compiler.Tests/JunexisLang.Compiler.Tests.csproj" />
+  <Project Path="JunexisLang.Compiler.Topology/JunexisLang.Compiler.Topology.csproj" />
+  <Project Path="JunexisLang.Embedded.Toolchain/JunexisLang.Embedded.Toolchain.csproj" />
+</Solution>

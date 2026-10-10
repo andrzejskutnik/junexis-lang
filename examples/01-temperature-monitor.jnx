@@ -1,0 +1,105 @@
+// PRZYKŁAD 1: Monitoring temperatury — najprostszy możliwy system
+// Minimalna konfiguracja — kompilator dobiera transport i serializację
+
+// ===== TYPY DANYCH =====
+
+struct TempReading {
+    celsius:   Float
+    device_id: Text
+    timestamp: Time
+}
+
+struct Alert {
+    level:    Text
+    message:  Text
+    value:    Float
+    at:       Time
+}
+
+extern task dht_read_celsius(pin: u8) @embedded -> Float
+extern task render_alert(alert: Alert) @report
+
+// ===== DEVICE =====
+
+device kitchen_sensor @embedded(esp32c3) {
+    hardware {
+        dht22_pin: u8 : 4
+    }
+    network {
+        ip:   Text : "192.168.1.50"
+        port: u16  : 1883
+    }
+}
+
+// ===== TASKS =====
+
+// Task 1: Czyta temperaturę co 5 sekund z DHT22 (@embedded)
+// Kompilator generuje: C++/PlatformIO, MQTT publish
+task TempSensor() @embedded(kitchen_sensor) -> chan<TempReading> {
+    config {
+        dht22_pin: u8 : 4
+        device_id: Text : "kitchen"
+    }
+
+    every 5s {
+        let pin  = config.dht22_pin
+        let temp = dht_read_celsius(pin)
+        send TempReading {
+            celsius: temp,
+            device_id: config.device_id,
+            timestamp: now()
+        }
+    }
+}
+
+// Task 2: Odbiera odczyty, przetwarza, wysyła alerty (@server)
+// Kompilator generuje: Go, MQTT subscribe + channel
+task TempProcessor(
+    readings: chan<TempReading>
+) @server -> chan<Alert> {
+    config {
+        high_threshold:  Float : 30.0
+        low_threshold:   Float : 10.0
+        alert_cooldown:  Duration : 5m
+    }
+
+    state last_alert: Time = epoch()
+
+    loop {
+        let r = recv readings
+
+        let too_hot  = r.celsius > config.high_threshold
+        let too_cold = r.celsius < config.low_threshold
+        let cooldown_ok = now() - last_alert > config.alert_cooldown
+
+        if (too_hot or too_cold) and cooldown_ok {
+            let level = too_hot ? "HIGH" : "LOW"
+            send Alert {
+                level: level,
+                message: "Temperature {level}: {r.celsius:.1f}°C",
+                value: r.celsius,
+                at: r.timestamp
+            }
+            last_alert = now()
+        }
+    }
+}
+
+// Task 3: Wyświetla alerty w przeglądarce (@report)
+// Kompilator generuje: TypeScript/React, WebSocket client
+task AlertDashboard(alerts: chan<Alert>) @report {
+    log("Dashboard starting...")
+
+    for alert in alerts {
+        log("ALERT [{alert.level}] {alert.message}")
+        render_alert(alert)
+    }
+}
+
+// ===== PIPELINE =====
+
+pipeline TempMonitoring {
+    use TempSensor  -> TempProcessor
+    use TempProcessor -> AlertDashboard
+}
+

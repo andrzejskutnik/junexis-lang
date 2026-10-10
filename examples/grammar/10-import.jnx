@@ -1,0 +1,59 @@
+// grammar/10-import.jnx
+// Pokrycie: importDeclaration (wszystkie warianty),
+//           modulePath (prosta nazwa i IDENTIFIER::IDENTIFIER::...),
+//           importSymbolList, importSymbol (z AS i bez),
+//           import z aliasem całego modułu
+
+// ─── import prosty (jeden segment) ───────────────────────────────────
+import stdlib
+
+// ─── import z AS alias modułu ─────────────────────────────────────────
+import stdlib as std
+
+// ─── import wielosegmentowy (IDENTIFIER :: IDENTIFIER) ────────────────
+import junexis::runtime
+
+// ─── import wielosegmentowy z aliasem ─────────────────────────────────
+import junexis::runtime::channels as chans
+
+// ─── import głęboki (3 segmenty) ──────────────────────────────────────
+import junexis::core::types
+
+// ─── import z listą symboli — jeden symbol ────────────────────────────
+import stdlib { Timer }
+
+// ─── import z listą symboli — wiele symboli ───────────────────────────
+import stdlib { Counter, Value, Flag, Label }
+
+// ─── import z listą symboli — z AS alias ──────────────────────────────
+import stdlib { Timer as Tmr, Label as Lbl }
+
+// ─── import z listą symboli — mix z i bez aliasów ─────────────────────
+import stdlib { Counter, Value as F32, Flag, Label as Str }
+
+// ─── import z listą symboli z trailing comma ──────────────────────────
+import stdlib {
+    Option,
+    Result,
+    Either,
+}
+
+// ─── import modułu ze ścieżką + lista symboli ─────────────────────────
+import junexis::runtime { Channel, Queue, Stream }
+
+// ─── import z aliasem symbolu w wielosegmentowej ścieżce ──────────────
+import junexis::runtime::channels { Channel as Chan, BroadcastStream as BS }
+
+// ─── opcjonalny SEMICOLON (bez średnika) ──────────────────────────────
+import mylib
+import mylib { Foo }
+import mylib as m
+
+// ─── opcjonalny SEMICOLON (ze średnikiem) ─────────────────────────────
+import other;
+import other { Bar };
+import other as o;
+
+// ─── właściwy plik żeby parser miał co z tym zrobić ──────────────────
+task NoopImportTest() {
+}

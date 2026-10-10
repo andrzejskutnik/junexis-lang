@@ -1,0 +1,3 @@
+import domain::observations
+
+task HomeStoragePanel(snapshots: chan<HomeSnapshot>) @report {}

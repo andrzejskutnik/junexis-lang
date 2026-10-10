@@ -1,0 +1,47 @@
+# Generic Embedded Platform Profile
+# Conservative fallback for unknown embedded platforms
+# Phase 27.5 - YAML-based platform profiles
+
+version: "1.0"
+platform: "@embedded"
+variant: "generic"
+
+capabilities:
+  threading: false # Conservative (no RTOS assumed)
+  fileIO: false # No file system assumed
+  networking: false # No WiFi/Ethernet assumed
+  async: false # No async/await on embedded
+  dynamicAllocation: true # Heap assumed available
+  realTimeClock: false # No RTC assumed
+  hardwareInterrupts: true # GPIO interrupts assumed
+
+limits:
+  maxMemoryBytes: 65536 # 64 KB SRAM (conservative default)
+  maxConcurrentTasks: 8 # Minimal concurrency
+
+metadata:
+  description: "Generic embedded platform (conservative fallback)"
+  manufacturer: "Unknown"
+  architecture: "Unknown"
+  frequency: "Unknown"
+  releaseYear: 0
+
+hardware:
+  ram: "64 KB (assumed)"
+  flash: "Unknown"
+
+recommended:
+  useCases:
+    - "Unknown/custom boards"
+    - "Initial prototyping"
+    - "Conservative compilation target"
+  notRecommended:
+    - "Production use (define specific profile instead)"
+    - "Performance-critical applications"
+    - "Advanced features (networking, threading)"
+
+constraints:
+  - type: "warning"
+    severity: "warning"
+    message: "Using generic profile - consider creating specific profile for your board"
+    code: "GENERIC_PROFILE"

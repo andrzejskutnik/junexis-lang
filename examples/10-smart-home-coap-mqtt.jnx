@@ -1,0 +1,131 @@
+// Inteligentny dom z protokołami CoAP i MQTT
+// Demonstracja wieloprotokołowej komunikacji IoT
+
+struct OdczytSensora {
+    id_sensora: Text,
+    typ: Text,
+    wartosc: f32,
+    jednostka: Text,
+    znacznik_czasu: u64
+}
+
+struct KomendaUrzadzenia {
+    id_docelowe: Text,
+    akcja: Text,
+    parametry: Text
+}
+
+struct WiadomoscAlertu {
+    temat: Text,
+    tresc: Text,
+    priorytet: u8,
+    znacznik_czasu: u64
+}
+
+struct SurowyOdczytSensora {
+    temperatura: f32
+}
+
+extern task odczytaj_sensory() @embedded -> SurowyOdczytSensora
+extern task czas_systemowy() @embedded @server -> u64
+extern task publikuj_mqtt(temat: Text, odczyt: OdczytSensora) @server
+extern task wykonaj_komende(id: Text, akcja: Text, parametry: Text) @server
+
+// Sensor CoAP na urządzeniu embedded
+task SensorCoAP() @embedded(esp32c3) -> chan<OdczytSensora> {
+    config {
+        adres_ip: Text : "192.168.1.100",
+        port_coap: u16 : 5683,
+        sciezka_zasobu: Text : "/sensor/dane"
+    }
+
+    every 10s {
+        var dane = odczytaj_sensory();
+        // Wyślij przez CoAP
+        send OdczytSensora {
+            id_sensora: "coap-sensor-01",
+            typ: "temperatura",
+            wartosc: dane.temperatura,
+            jednostka: "°C",
+            znacznik_czasu: czas_systemowy()
+        };
+    }
+}
+
+// Most MQTT łączący CoAP z chmurą
+task MostMQTT(odczyty: chan<OdczytSensora>) @server -> chan<OdczytSensora> {
+    config {
+        broker_mqtt: Text : "mqtt.example.com",
+        port_mqtt: u16 : 1883,
+        temat_bazowy: Text : "junexis/dom/sensory"
+    }
+
+    for odczyt in odczyty {
+        // Opublikuj w MQTT
+        var temat = "{temat_bazowy}/{odczyt.id_sensora}";
+        publikuj_mqtt(temat, odczyt);
+        send odczyt;
+    }
+}
+
+// Logika decyzyjna — przekształca odczyty sensorów na komendy dla urządzeń
+task LogikaDecyzyjna(odczyty: chan<OdczytSensora>) @server -> chan<KomendaUrzadzenia> {
+    state prog_temp_wlacz: f32 = 30.0;
+    state prog_temp_wylacz: f32 = 22.0;
+
+    for odczyt in odczyty {
+        if odczyt.typ == "temperatura" and odczyt.wartosc > prog_temp_wlacz {
+            send KomendaUrzadzenia {
+                id_docelowe: "klimatyzacja-01",
+                akcja: "wlacz",
+                parametry: "tryb=chlodzenie"
+            };
+        }
+        if odczyt.typ == "temperatura" and odczyt.wartosc < prog_temp_wylacz {
+            send KomendaUrzadzenia {
+                id_docelowe: "klimatyzacja-01",
+                akcja: "wylacz",
+                parametry: ""
+            };
+        }
+    }
+}
+
+// Sterownik urządzeń
+task SterownikUrzadzen(komendy: chan<KomendaUrzadzenia>) @server {
+    for komenda in komendy {
+        wykonaj_komende(komenda.id_docelowe, komenda.akcja, komenda.parametry);
+    }
+}
+
+// Obsługa alertów
+task ObslugaAlertow(odczyty: chan<OdczytSensora>) @server -> chan<WiadomoscAlertu> {
+    state prog_temperatury: f32 = 28.0;
+    state prog_wilgotnosci: f32 = 80.0;
+
+    for odczyt in odczyty {
+        if odczyt.typ == "temperatura" and odczyt.wartosc > prog_temperatury {
+            send WiadomoscAlertu {
+                temat: "alert/temperatura",
+                tresc: "Wysoka temperatura wykryta: {odczyt.wartosc}°C",
+                priorytet: 2,
+                znacznik_czasu: czas_systemowy()
+            };
+        }
+        if odczyt.typ == "wilgotnosc" and odczyt.wartosc > prog_wilgotnosci {
+            send WiadomoscAlertu {
+                temat: "alert/wilgotnosc",
+                tresc: "Wysoka wilgotność: {odczyt.wartosc}%",
+                priorytet: 1,
+                znacznik_czasu: czas_systemowy()
+            };
+        }
+    }
+}
+
+pipeline InteligentyDomCoAPMQTT {
+    use SensorCoAP -> MostMQTT;
+    use MostMQTT -> ObslugaAlertow;
+    use MostMQTT -> LogikaDecyzyjna;
+    use LogikaDecyzyjna -> SterownikUrzadzen;
+}

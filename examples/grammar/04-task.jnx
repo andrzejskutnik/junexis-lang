@@ -1,0 +1,140 @@
+// grammar/04-task.jnx
+// Pokrycie: taskDeclaration, platformAnnotation, communicationSignature,
+//           taskBody, taskMember — stateDeclaration, configBlock, lifecycleHook,
+//           parameterList, statement wewnątrz tasku
+
+// ─── task minimalny: brak parametrów, platformy, ciała komunikacji ────
+task Noop() {
+}
+
+// ─── task z parametrami ───────────────────────────────────────────────
+task Echo(input: chan<Text>) -> chan<Text> {
+    loop {
+        let msg = recv input
+        send msg
+    }
+}
+
+// ─── task z platformAnnotation — pozycyjny identifier ─────────────────
+task SensorReader() @embedded {
+    every 1s {
+        let v = read_adc(0)
+        send v
+    }
+}
+
+// ─── task z platformAnnotation — pozycyjny literal ────────────────────
+task GatewayTask() @embedded("esp32c3") -> chan<Int> {
+    every 500ms {
+        send 42
+    }
+}
+
+// ─── task z platformAnnotation — klucz=wartość ────────────────────────
+task ServerWorker() @server(workers = 4, memory = 256MB) -> chan<Text> {
+    loop {
+        send "ok"
+    }
+}
+
+// ─── task z wieloma platformAnnotation ────────────────────────────────
+task HybridTask()
+    @embedded(esp32s3)
+    @server(replicas = 2)
+    -> stream<Float>
+{
+    every 1s {
+        send 1.0
+    }
+}
+
+// ─── taskMember: state ────────────────────────────────────────────────
+task Counter() @server -> chan<Int> {
+    state count: Int = 0
+    state last_tick: Time = epoch()
+
+    every 1s {
+        count += 1
+        send count
+    }
+}
+
+// ─── taskMember: config ───────────────────────────────────────────────
+task Throttler(input: chan<Float>) @server -> chan<Float> {
+    config {
+        max_rate:    Float    : 100.0
+        window:      Duration : 1s
+        drop_excess: Bool     : true
+    }
+
+    state window_count: Int = 0
+
+    loop {
+        let v = recv input
+        if window_count < config.max_rate {
+            send v
+            window_count += 1
+        }
+    }
+}
+
+// ─── taskMember: lifecycleHook (on_start, on_stop, on_error) ─────────
+task ManagedTask() @server -> chan<Text> {
+    on start {
+        log("ManagedTask started")
+    }
+
+    on stop {
+        log("ManagedTask stopped")
+    }
+
+    on error {
+        log("ManagedTask error")
+    }
+
+    on connect {
+        log("client connected")
+    }
+
+    on disconnect {
+        log("client disconnected")
+    }
+
+    loop {
+        send "heartbeat"
+        delay 1s
+    }
+}
+
+// ─── task z wszystkimi taskMember razem ───────────────────────────────
+task FullTask(upstream: chan<Float>) @server -> stream<Float> {
+    state processed: u64 = 0
+
+    config {
+        threshold: Float : 0.5
+        batch:     u32   : 16
+    }
+
+    on start {
+        log("FullTask ready, threshold={config.threshold}")
+    }
+
+    loop {
+        let v = recv upstream
+        if v > config.threshold {
+            processed += 1
+            send v
+        }
+    }
+}
+
+// ─── task @report (bez komunikacji wychodzącej) ───────────────────────
+task Dashboard(events: stream<Text>) @report {
+    on start {
+        log("Dashboard mounted")
+    }
+
+    for event in events {
+        log(event)
+    }
+}

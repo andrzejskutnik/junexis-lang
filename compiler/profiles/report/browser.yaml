@@ -1,0 +1,59 @@
+# Browser Platform Profile
+# Frontend web applications, dashboards, reports
+# Phase 27.5 - YAML-based platform profiles
+
+version: "1.0"
+platform: "@report"
+variant: "browser"
+
+capabilities:
+  threading: true # Web Workers, SharedArrayBuffer
+  fileIO: false # Sandboxed (only LocalStorage, IndexedDB)
+  networking: true # fetch API, WebSockets, WebRTC
+  async: true # Promises, async/await
+  dynamicAllocation: true # Heap available (browser-managed)
+  realTimeClock: true # Date.now(), performance.now()
+  hardwareInterrupts: false # No hardware access
+
+limits:
+  maxMemoryBytes: 2147483648 # 2 GB browser heap (typical limit)
+  maxConcurrentTasks: 100 # Browser tab limit (Web Workers)
+
+metadata:
+  description: "Browser platform (frontend, dashboards, reports)"
+  manufacturer: "Various (Chrome, Firefox, Safari, Edge)"
+  architecture: "JavaScript VM (V8, SpiderMonkey, JavaScriptCore)"
+  frequency: "N/A"
+  releaseYear: 1995
+
+hardware:
+  ram: "2 GB browser heap (typical)"
+  flash: "LocalStorage (5-10 MB), IndexedDB (50+ MB)"
+
+recommended:
+  useCases:
+    - "Real-time dashboards"
+    - "Data visualization (charts, graphs)"
+    - "Interactive reports"
+    - "WebSocket clients (live updates)"
+    - "Single-Page Applications (SPA)"
+    - "Progressive Web Apps (PWA)"
+  notRecommended:
+    - "File system operations (use @server)"
+    - "Direct database access (use @server + REST API)"
+    - "CPU-intensive tasks (limited by browser)"
+    - "Long-running background processes (tab suspension)"
+
+constraints:
+  - type: "info"
+    severity: "info"
+    message: "Browser is sandboxed - use LocalStorage/IndexedDB or @server for persistence"
+    code: "NO_FILE_IO"
+  - type: "info"
+    severity: "info"
+    message: "Cross-Origin Resource Sharing (CORS) restrictions apply to fetch API"
+    code: "CORS"
+  - type: "info"
+    severity: "info"
+    message: "Browser heap limited to ~2GB - avoid large in-memory datasets"
+    code: "MEMORY_LIMIT"

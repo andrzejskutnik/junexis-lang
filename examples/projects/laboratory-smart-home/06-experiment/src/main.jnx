@@ -1,0 +1,336 @@
+// Laboratorium Junexis — Dom 6: Eksperymentuj.
+// Ten sam dom ujawnia wpływ progu, opóźnienia i budżetu świeżości.
+
+struct SensorReading {
+    room: Text
+    air_quality: Float
+    observed_at: Time
+}
+
+struct ExperimentContext {
+    threshold: Float
+    communication_delay_ms: Int
+    max_age_ms: Int
+    observation_age_ms: Int
+    fresh: Bool
+    revision: Int
+    profile: Text
+}
+
+struct HomeDecision {
+    room: Text
+    air_quality: Float
+    threshold: Float
+    outcome: Text
+    reason: Text
+    fresh: Bool
+    observation_age_ms: Int
+    max_age_ms: Int
+    communication_delay_ms: Int
+    experiment_revision: Int
+    experiment_profile: Text
+    observed_at: Time
+    decided_at: Time
+}
+
+struct VentilationCommand {
+    room: Text
+    air_quality: Float
+    threshold: Float
+    decision: Text
+    requested_enabled: Bool
+    execution_mode: Text
+    cause: Text
+    fresh: Bool
+    observation_age_ms: Int
+    max_age_ms: Int
+    communication_delay_ms: Int
+    experiment_revision: Int
+    experiment_profile: Text
+    observed_at: Time
+    issued_at: Time
+}
+
+struct VentilationConfirmation {
+    room: Text
+    air_quality: Float
+    threshold: Float
+    decision: Text
+    requested_enabled: Bool
+    actual_enabled: Bool
+    status: Text
+    cause: Text
+    fresh: Bool
+    observation_age_ms: Int
+    max_age_ms: Int
+    communication_delay_ms: Int
+    experiment_revision: Int
+    experiment_profile: Text
+    observed_at: Time
+    confirmed_at: Time
+}
+
+extern laboratory HomeExperiment {
+    target server
+    language go
+    file "user/server/home_experiment.go"
+
+    fn evaluate(observed_at: Time) -> ExperimentContext
+    fn publish(confirmation: VentilationConfirmation)
+}
+
+extern task HomeExperiment_evaluate(observed_at: Time) @server -> ExperimentContext
+extern task HomeExperiment_publish(confirmation: VentilationConfirmation) @server
+
+task LivingRoomSensor() @server -> chan<SensorReading> {
+    config {
+        room: Text : "salon"
+        interval: Duration : 2s
+    }
+    state scenario_step: Int = 0
+    every config.interval {
+        scenario_step = scenario_step + 1
+        if scenario_step == 1 {
+            send SensorReading { room: config.room, air_quality: 420.0, observed_at: now() }
+        }
+        if scenario_step == 2 {
+            send SensorReading { room: config.room, air_quality: 1250.0, observed_at: now() }
+            scenario_step = 0
+        }
+    }
+}
+
+task KitchenSensor() @server -> chan<SensorReading> {
+    config {
+        room: Text : "kuchnia"
+        interval: Duration : 3s
+    }
+    state scenario_step: Int = 0
+    every config.interval {
+        scenario_step = scenario_step + 1
+        if scenario_step == 1 {
+            send SensorReading { room: config.room, air_quality: 780.0, observed_at: now() }
+        }
+        if scenario_step == 2 {
+            send SensorReading { room: config.room, air_quality: 1650.0, observed_at: now() }
+            scenario_step = 0
+        }
+    }
+}
+
+task BedroomSensor() @server -> chan<SensorReading> {
+    config {
+        room: Text : "sypialnia"
+        interval: Duration : 4s
+    }
+    state scenario_step: Int = 0
+    every config.interval {
+        scenario_step = scenario_step + 1
+        if scenario_step == 1 {
+            send SensorReading { room: config.room, air_quality: 560.0, observed_at: now() }
+        }
+        if scenario_step == 2 {
+            send SensorReading { room: config.room, air_quality: 920.0, observed_at: now() }
+            scenario_step = 0
+        }
+    }
+}
+
+task RoomReadingMerge(
+    living_room: chan<SensorReading>,
+    kitchen: chan<SensorReading>,
+    bedroom: chan<SensorReading>
+) @server -> chan<SensorReading> {
+    loop {
+        let living_reading = recv living_room
+        send living_reading
+        let kitchen_reading = recv kitchen
+        send kitchen_reading
+        let bedroom_reading = recv bedroom
+        send bedroom_reading
+    }
+}
+
+task AirQualityDecision(readings: chan<SensorReading>) @server -> chan<HomeDecision> {
+    loop {
+        let reading = recv readings
+        let experiment = HomeExperiment_evaluate(reading.observed_at)
+
+        if not experiment.fresh {
+            send HomeDecision {
+                room: reading.room,
+                air_quality: reading.air_quality,
+                threshold: experiment.threshold,
+                outcome: "hold-stale-reading",
+                reason: "pomiar przekroczył budżet świeżości",
+                fresh: experiment.fresh,
+                observation_age_ms: experiment.observation_age_ms,
+                max_age_ms: experiment.max_age_ms,
+                communication_delay_ms: experiment.communication_delay_ms,
+                experiment_revision: experiment.revision,
+                experiment_profile: experiment.profile,
+                observed_at: reading.observed_at,
+                decided_at: now()
+            }
+        }
+
+        if experiment.fresh and reading.air_quality <= experiment.threshold {
+            send HomeDecision {
+                room: reading.room,
+                air_quality: reading.air_quality,
+                threshold: experiment.threshold,
+                outcome: "observe",
+                reason: "świeży pomiar nie przekracza progu",
+                fresh: experiment.fresh,
+                observation_age_ms: experiment.observation_age_ms,
+                max_age_ms: experiment.max_age_ms,
+                communication_delay_ms: experiment.communication_delay_ms,
+                experiment_revision: experiment.revision,
+                experiment_profile: experiment.profile,
+                observed_at: reading.observed_at,
+                decided_at: now()
+            }
+        }
+
+        if experiment.fresh and reading.air_quality > experiment.threshold {
+            send HomeDecision {
+                room: reading.room,
+                air_quality: reading.air_quality,
+                threshold: experiment.threshold,
+                outcome: "enable-ventilation",
+                reason: "świeży pomiar przekracza próg",
+                fresh: experiment.fresh,
+                observation_age_ms: experiment.observation_age_ms,
+                max_age_ms: experiment.max_age_ms,
+                communication_delay_ms: experiment.communication_delay_ms,
+                experiment_revision: experiment.revision,
+                experiment_profile: experiment.profile,
+                observed_at: reading.observed_at,
+                decided_at: now()
+            }
+        }
+    }
+}
+
+task VentilationController(decisions: chan<HomeDecision>) @server -> chan<VentilationCommand> {
+    loop {
+        let decision = recv decisions
+
+        if decision.outcome == "observe" {
+            send VentilationCommand {
+                room: decision.room, air_quality: decision.air_quality, threshold: decision.threshold,
+                decision: decision.outcome, requested_enabled: false, execution_mode: "applied",
+                cause: decision.reason, fresh: decision.fresh,
+                observation_age_ms: decision.observation_age_ms, max_age_ms: decision.max_age_ms,
+                communication_delay_ms: decision.communication_delay_ms,
+                experiment_revision: decision.experiment_revision,
+                experiment_profile: decision.experiment_profile,
+                observed_at: decision.observed_at, issued_at: now()
+            }
+        }
+
+        if decision.outcome == "enable-ventilation" {
+            send VentilationCommand {
+                room: decision.room, air_quality: decision.air_quality, threshold: decision.threshold,
+                decision: decision.outcome, requested_enabled: true, execution_mode: "applied",
+                cause: decision.reason, fresh: decision.fresh,
+                observation_age_ms: decision.observation_age_ms, max_age_ms: decision.max_age_ms,
+                communication_delay_ms: decision.communication_delay_ms,
+                experiment_revision: decision.experiment_revision,
+                experiment_profile: decision.experiment_profile,
+                observed_at: decision.observed_at, issued_at: now()
+            }
+        }
+
+        if decision.outcome == "hold-stale-reading" {
+            send VentilationCommand {
+                room: decision.room, air_quality: decision.air_quality, threshold: decision.threshold,
+                decision: decision.outcome, requested_enabled: false, execution_mode: "held-stale-reading",
+                cause: decision.reason, fresh: decision.fresh,
+                observation_age_ms: decision.observation_age_ms, max_age_ms: decision.max_age_ms,
+                communication_delay_ms: decision.communication_delay_ms,
+                experiment_revision: decision.experiment_revision,
+                experiment_profile: decision.experiment_profile,
+                observed_at: decision.observed_at, issued_at: now()
+            }
+        }
+    }
+}
+
+task VentilationActuator(commands: chan<VentilationCommand>) @server -> chan<VentilationConfirmation> {
+    state living_room_enabled: Bool = false
+    state kitchen_enabled: Bool = false
+    state bedroom_enabled: Bool = false
+
+    loop {
+        let command = recv commands
+
+        if command.execution_mode == "applied" and command.room == "salon" {
+            living_room_enabled = command.requested_enabled
+        }
+        if command.execution_mode == "applied" and command.room == "kuchnia" {
+            kitchen_enabled = command.requested_enabled
+        }
+        if command.execution_mode == "applied" and command.room == "sypialnia" {
+            bedroom_enabled = command.requested_enabled
+        }
+
+        if command.room == "salon" {
+            send VentilationConfirmation {
+                room: command.room, air_quality: command.air_quality, threshold: command.threshold,
+                decision: command.decision, requested_enabled: command.requested_enabled,
+                actual_enabled: living_room_enabled, status: command.execution_mode,
+                cause: command.cause, fresh: command.fresh,
+                observation_age_ms: command.observation_age_ms, max_age_ms: command.max_age_ms,
+                communication_delay_ms: command.communication_delay_ms,
+                experiment_revision: command.experiment_revision,
+                experiment_profile: command.experiment_profile,
+                observed_at: command.observed_at, confirmed_at: now()
+            }
+        }
+        if command.room == "kuchnia" {
+            send VentilationConfirmation {
+                room: command.room, air_quality: command.air_quality, threshold: command.threshold,
+                decision: command.decision, requested_enabled: command.requested_enabled,
+                actual_enabled: kitchen_enabled, status: command.execution_mode,
+                cause: command.cause, fresh: command.fresh,
+                observation_age_ms: command.observation_age_ms, max_age_ms: command.max_age_ms,
+                communication_delay_ms: command.communication_delay_ms,
+                experiment_revision: command.experiment_revision,
+                experiment_profile: command.experiment_profile,
+                observed_at: command.observed_at, confirmed_at: now()
+            }
+        }
+        if command.room == "sypialnia" {
+            send VentilationConfirmation {
+                room: command.room, air_quality: command.air_quality, threshold: command.threshold,
+                decision: command.decision, requested_enabled: command.requested_enabled,
+                actual_enabled: bedroom_enabled, status: command.execution_mode,
+                cause: command.cause, fresh: command.fresh,
+                observation_age_ms: command.observation_age_ms, max_age_ms: command.max_age_ms,
+                communication_delay_ms: command.communication_delay_ms,
+                experiment_revision: command.experiment_revision,
+                experiment_profile: command.experiment_profile,
+                observed_at: command.observed_at, confirmed_at: now()
+            }
+        }
+    }
+}
+
+task ExperimentProjection(confirmations: chan<VentilationConfirmation>) @server {
+    for confirmation in confirmations {
+        HomeExperiment_publish(confirmation)
+        log("EKSPERYMENT rewizja={confirmation.experiment_revision} profil={confirmation.experiment_profile} pokoj={confirmation.room} pomiar={confirmation.air_quality:.0f} wiek={confirmation.observation_age_ms} swiezy={confirmation.fresh} decyzja={confirmation.decision} wykonanie={confirmation.status} stan={confirmation.actual_enabled}")
+    }
+}
+
+pipeline HomeExperimentFlow {
+    use LivingRoomSensor -> RoomReadingMerge
+    use KitchenSensor -> RoomReadingMerge
+    use BedroomSensor -> RoomReadingMerge
+    use RoomReadingMerge -> AirQualityDecision
+    use AirQualityDecision -> VentilationController
+    use VentilationController -> VentilationActuator
+    use VentilationActuator -> ExperimentProjection
+}
+

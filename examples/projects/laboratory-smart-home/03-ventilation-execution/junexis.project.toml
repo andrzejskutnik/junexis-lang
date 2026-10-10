@@ -1,0 +1,4 @@
+name = "smart-home-ventilation-execution"
+entry = "src/main.jnx"
+targets = ["server"]
+outDir = "out"

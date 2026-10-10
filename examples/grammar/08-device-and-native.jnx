@@ -1,0 +1,138 @@
+// grammar/08-device-and-native.jnx
+// Pokrycie: deviceDeclaration, deviceMember (hardwareBlock, networkBlock,
+//           timingBlock, nativeSection, configBlock), deviceField,
+//           nativeSection wewnątrz task, nativeLanguage, nativeField,
+//           nativeValue (stringLiteral, rawString, tripleString, codeBlock, nativeFieldList)
+
+// ─── device z hardwareBlock ──────────────────────────────────────────
+device temperature_sensor @embedded(esp32c3) {
+    hardware {
+        dht22_pin: u8  : 4
+        led_pin:   u8  : 2
+        adc_pin:   u8  : 34
+        i2c_sda:   u8  : 21
+        i2c_scl:   u8  : 22
+    }
+}
+
+// ─── device z networkBlock ────────────────────────────────────────────
+device edge_server @embedded(esp32s3) {
+    network {
+        ip:            Text : "192.168.1.100"
+        port:          u16  : 1883
+        conn_protocol: Text : "mqtt"
+        host:          Text : "broker.local"
+    }
+}
+
+// ─── device z timingBlock ─────────────────────────────────────────────
+device precision_timer @embedded(stm32f4) {
+    timing {
+        sample_rate: Duration : 1ms
+        report_rate: Duration : 1s
+        watchdog:    Duration : 10s
+    }
+}
+
+// ─── device z configBlock ─────────────────────────────────────────────
+device configurable @embedded {
+    config {
+        max_retries:  u8      : 3
+        buffer_size:  Int     : 512KB
+        debug:        Bool    : false
+    }
+}
+
+// ─── device z nativeSection (zależności biblioteczne) ─────────────────
+device sensor_with_lib @embedded(esp32c3) {
+    hardware {
+        dht_pin: u8 : 4
+    }
+
+    native {
+        @cpp {
+            include:  "DHT.h"
+            library:  "adafruit/DHT sensor library@1.4.4"
+            use:      "DHT dht(DHT_PIN, DHT22);"
+            init:     code { dht.begin(); }
+        }
+    }
+}
+
+// ─── device złożony: wszystkie bloki ─────────────────────────────────
+device full_node @embedded(esp32s3) {
+    hardware {
+        sda:  u8 : 21
+        scl:  u8 : 22
+        cs:   u8 : 5
+    }
+
+    network {
+        ssid:     Text : "MyNetwork"
+        password: Text : "secret"
+        broker:   Text : "mqtt.local"
+        port:     u16  : 1883
+    }
+
+    timing {
+        poll:    Duration : 100ms
+        timeout: Duration : 5s
+    }
+
+    config {
+        log_level: Text : "info"
+        buffer:    Int  : 4096
+    }
+
+    native {
+        @cpp {
+            include:  "Wire.h"
+            include:  "SPI.h"
+            library:  "esp32/WiFi"
+        }
+        @embedded_rust {
+            crate:    "esp_idf_svc"
+        }
+    }
+}
+
+// ─── nativeSection wewnątrz TASK ─────────────────────────────────────
+task SensorTask() @embedded(esp32c3) -> chan<Float> {
+    native {
+        @cpp {
+            // nativeValue jako STRING_LITERAL
+            include: "DHT.h"
+
+            // nativeValue jako nativeFieldList: [str, str, ...]
+            includes: ["Wire.h", "SPI.h", "ArduinoJson.h"]
+
+            // nativeValue jako RAW_STRING
+            path: @"C:\libs\custom_driver.h"
+
+            // nativeValue jako TRIPLE_STRING
+            snippet: """
+                DHT dht(4, DHT22);
+                float readTemp() { return dht.readTemperature(); }
+            """
+
+            // nativeValue jako codeBlock
+            init: code {
+                Serial.begin(115200);
+                dht.begin();
+            }
+
+            // nativeValue jako codeBlock z zagnieżdżonym blokiem
+            setup: code {
+                if (!sensor.init()) {
+                    Serial.println("error");
+                    while(1) { delay(10); }
+                }
+            }
+        }
+    }
+
+    every 1s {
+        let temp = read_temperature()
+        send temp
+    }
+}

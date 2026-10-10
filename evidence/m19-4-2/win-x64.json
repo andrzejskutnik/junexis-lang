@@ -1,0 +1,40 @@
+{
+  "schemaVersion": "junexis.language-tools-build-receipt/0.1",
+  "version": "0.19.0-preview.1",
+  "rid": "win-x64",
+  "system": "windows",
+  "architecture": "x64",
+  "components": [
+    {
+      "id": "compiler-cli",
+      "entrypoint": "JunexisLang.Compiler.CLI.exe",
+      "protocolVersion": 2
+    },
+    {
+      "id": "lsp",
+      "entrypoint": "JunexisLang.Compiler.LspHost.exe",
+      "protocolVersion": 1
+    }
+  ],
+  "artifact": {
+    "file": "junexis-language-tools-0.19.0-preview.1-win-x64.zip",
+    "sizeBytes": 100560674,
+    "sha256": "8559923f350bf259a9514de2b38a850bcdca2da385c8a6d6849e55d4179cbd50"
+  },
+  "proof": {
+    "kind": "native-smoke",
+    "hostRid": "win-x64",
+    "checks": [
+      {
+        "component": "compiler-cli",
+        "command": "JunexisLang.Compiler.CLI.exe --help",
+        "exitCode": 0
+      },
+      {
+        "component": "lsp",
+        "command": "JunexisLang.Compiler.LspHost.exe --version",
+        "exitCode": 0
+      }
+    ]
+  }
+}

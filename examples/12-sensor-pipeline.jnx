@@ -1,0 +1,213 @@
+// Potok przetwarzania danych sensorów
+// Wieloetapowy potok: odczyt → walidacja → agregacja → wykrywanie anomalii → zapis → powiadomienia
+
+struct OdczytSensora {
+    id_sensora: Text,
+    temperatura: f32,
+    wilgotnosc: f32,
+    cisnienie: f32,
+    znacznik_czasu: u64
+}
+
+struct ZwalidowanyOdczyt {
+    odczyt: OdczytSensora,
+    wynik_walidacji: Text
+}
+
+struct PrzetworzoneDane {
+    srednia_temp: f32,
+    srednia_wilg: f32,
+    srednie_cisnienie: f32,
+    liczba_probek: u32,
+    okno_czasowe: u64
+}
+
+struct Alert {
+    typ: Text,
+    wiadomosc: Text,
+    powaga: Text,
+    znacznik_czasu: u64
+}
+
+struct WynikZapisu {
+    sukces: Bool,
+    id_rekordu: Text
+}
+
+extern task odczytaj_temperature(pin: u8) @embedded -> f32
+extern task odczytaj_wilgotnosc(pin: u8) @embedded -> f32
+extern task odczytaj_cisnienie(pin: u8) @embedded -> f32
+extern task id_urzadzenia() @embedded -> Text
+extern task czas_unix() @embedded @server -> u64
+extern task srednia_temperatury(bufor: [ZwalidowanyOdczyt]) @server -> f32
+extern task srednia_wilgotnosci(bufor: [ZwalidowanyOdczyt]) @server -> f32
+extern task srednia_cisnienia(bufor: [ZwalidowanyOdczyt]) @server -> f32
+extern task zapisz_do_bazy(dane: PrzetworzoneDane) @server -> Text
+extern task wyslij_email(adres: Text, wiadomosc: Text) @server
+
+// Odczyt z 4 sensorów ESP32
+task CzytajSensory() @embedded(esp32) -> chan<OdczytSensora> {
+    config {
+        pin_dht: u8 : 4,
+        pin_bmp: u8 : 21,
+        interwal_ms: u32 : 5000
+    }
+
+    every 5s {
+        var temp = odczytaj_temperature(pin_dht);
+        var wilg = odczytaj_wilgotnosc(pin_dht);
+        var cisn = odczytaj_cisnienie(pin_bmp);
+
+        send OdczytSensora {
+            id_sensora: id_urzadzenia(),
+            temperatura: temp,
+            wilgotnosc: wilg,
+            cisnienie: cisn,
+            znacznik_czasu: czas_unix()
+        };
+    }
+}
+
+// Walidacja odczytów
+task WalidujOdczyty(wejscie: chan<OdczytSensora>) @server -> chan<ZwalidowanyOdczyt> {
+    for odczyt in wejscie {
+        var wynik = "ok";
+
+        if odczyt.temperatura < -40.0 or odczyt.temperatura > 85.0 {
+            wynik = "temperatura_poza_zakresem";
+        }
+        if odczyt.wilgotnosc < 0.0 or odczyt.wilgotnosc > 100.0 {
+            wynik = "wilgotnosc_poza_zakresem";
+        }
+
+        send ZwalidowanyOdczyt {
+            odczyt: odczyt,
+            wynik_walidacji: wynik
+        };
+    }
+}
+
+// Agregacja w oknach czasowych
+task AgregujDane(wejscie: chan<ZwalidowanyOdczyt>) @server -> chan<PrzetworzoneDane> {
+    state bufor: [ZwalidowanyOdczyt] = [];
+    state rozmiar_okna: u32 = 12; // 12 odczytów = 1 minuta przy 5s interwale
+
+    for odczyt in wejscie {
+        if odczyt.wynik_walidacji == "ok" {
+            bufor = dodaj(bufor, odczyt);
+        }
+
+        if dlugosc(bufor) >= rozmiar_okna {
+            var srednia_t = srednia_temperatury(bufor);
+            var srednia_w = srednia_wilgotnosci(bufor);
+            var srednia_c = srednia_cisnienia(bufor);
+
+            send PrzetworzoneDane {
+                srednia_temp: srednia_t,
+                srednia_wilg: srednia_w,
+                srednie_cisnienie: srednia_c,
+                liczba_probek: dlugosc(bufor),
+                okno_czasowe: czas_unix()
+            };
+
+            bufor = [];
+        }
+    }
+}
+
+// Wykrywanie anomalii
+task WykrywajAnomalie(wejscie: chan<PrzetworzoneDane>) @server -> chan<Alert> {
+    state prog_temp: f32 = 30.0;
+    state prog_wilg: f32 = 80.0;
+
+    for dane in wejscie {
+        if dane.srednia_temp > prog_temp {
+            send Alert {
+                typ: "wysoka_temperatura",
+                wiadomosc: "Srednia temperatura przekracza prog alarmowy",
+                powaga: "ostrzezenie",
+                znacznik_czasu: czas_unix()
+            };
+        }
+
+        if dane.srednia_wilg > prog_wilg {
+            send Alert {
+                typ: "wysoka_wilgotnosc",
+                wiadomosc: "Srednia wilgotnosc przekracza prog alarmowy",
+                powaga: "ostrzezenie",
+                znacznik_czasu: czas_unix()
+            };
+        }
+    }
+}
+
+// Zapis do bazy danych
+task ZapiszDane(wejscie: chan<PrzetworzoneDane>) @server -> chan<WynikZapisu> {
+    for dane in wejscie {
+        var id = zapisz_do_bazy(dane);
+        send WynikZapisu {
+            sukces: true,
+            id_rekordu: id
+        };
+    }
+}
+
+// Wysyłanie powiadomień
+task WyslijPowiadomienia(alerty: chan<Alert>) @server -> chan<Bool> {
+    for alert in alerty {
+        wyslij_email("admin@przykład.pl", alert.wiadomosc);
+        send true;
+    }
+}
+
+// Wyświetlanie na dashboardzie
+task WyswietlDashboard(dane: chan<PrzetworzoneDane>) @report -> stream<PrzetworzoneDane> {
+    for rekord in dane {
+        send rekord;
+    }
+}
+
+// Podstawowy potok przetwarzania
+pipeline PrzetwarzanieSensorow {
+    use CzytajSensory -> WalidujOdczyty;
+    use WalidujOdczyty -> AgregujDane;
+    use AgregujDane -> ZapiszDane;
+}
+
+// Potok z alertami
+pipeline PrzetwarzanieSensorowZAlertami {
+    use CzytajSensory -> WalidujOdczyty;
+    use WalidujOdczyty -> AgregujDane;
+    use AgregujDane -> WykrywajAnomalie;
+    use AgregujDane -> ZapiszDane;
+    use WykrywajAnomalie -> WyslijPowiadomienia;
+}
+
+// Odporny potok z dashboardem
+pipeline OdpornyPotokSensorow {
+    use CzytajSensory -> WalidujOdczyty;
+    use WalidujOdczyty -> AgregujDane;
+    use AgregujDane -> WykrywajAnomalie;
+    use AgregujDane -> ZapiszDane;
+    use AgregujDane -> WyswietlDashboard;
+    use WykrywajAnomalie -> WyslijPowiadomienia;
+}
+
+deployment Produkcja {
+    target embedded {
+        CzytajSensory @embedded(esp32) {
+            instancje: 4,
+            adresy: ["192.168.1.10", "192.168.1.11", "192.168.1.12", "192.168.1.13"]
+        }
+    }
+    target server {
+        WalidujOdczyty @server { repliki: 2 }
+        AgregujDane @server { repliki: 2 }
+        WykrywajAnomalie @server { repliki: 1 }
+        ZapiszDane @server { repliki: 2 }
+        WyslijPowiadomienia @server { repliki: 1 }
+    }
+    target report {
+        WyswietlDashboard @report {}
+    }
+}

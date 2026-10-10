@@ -1,0 +1,108 @@
+// ================================================================================
+//  JUNEXIS SNIPPET: DHT22 Temperature & Humidity Sensor (Adafruit)
+// ================================================================================
+//
+//  Name:        dht22_adafruit
+//  Description: Adafruit DHT library for DHT22/AM2302 temperature and humidity sensor
+//  Author:      Junexis Team
+//  Version:     1.0.0
+//  Created:     2025-11-06
+//  Tags:        temperature, humidity, sensor, dht22, adafruit, esp32, arduino
+//
+//  Library:     Adafruit DHT-sensor-library
+//  Datasheet:   https://www.adafruit.com/product/385
+//  Tutorial:    https://learn.adafruit.com/dht
+//
+//  Compatible Platforms:
+//    - ESP32 (all variants: C3, S3, WROOM, etc.)
+//    - Arduino (Uno, Mega, Nano, etc.)
+//    - STM32
+//    - Raspberry Pi Pico
+//
+//  Parameters:
+//    - pin: GPIO pin number (default: 4)
+//    - sensor_type: DHT11 or DHT22 (default: DHT22)
+//
+//  Usage Example:
+//    device sensor_kitchen @embedded(esp32c3) {
+//      reference {
+//        @c/c++ {
+//          import: "dht22_adafruit"
+//        }
+//      }
+//      hardware {
+//        dht22_pin: u8 : 4      // Override default pin
+//      }
+//    }
+//
+//  Generated C++ Code:
+//    #include <DHT.h>
+//    DHT dht;
+//    dht.begin(4, DHT22);
+//
+// ================================================================================
+
+snippet dht22_adafruit {
+  name: "DHT22 Temperature Sensor (Adafruit)"
+  description: "Adafruit DHT library for DHT22/AM2302 temperature and humidity sensor"
+  author: "Junexis Team"
+  version: "1.0.0"
+  tags: ["temperature", "humidity", "sensor", "dht22", "adafruit"]
+  
+  // Configurable parameters (with defaults)
+  parameters {
+    pin: u8 : 4                      // GPIO pin (default: 4, override with hardware.dht22_pin)
+    sensor_type: string : "DHT22"    // DHT11 or DHT22 (default: DHT22)
+  }
+}
+
+// ===== DEVICE REFERENCE TEMPLATE =====
+device dht22_adafruit_template @embedded {
+  reference {
+    // ----- C/C++ (Arduino/ESP-IDF) -----
+    @c/c++ "DHT22 Temperature Sensor" {
+      library: "adafruit/DHT-sensor-library@^1.4.6";
+      include: <DHT.h>;
+      declare: DHT dht;
+      // Initialization: Use on_start hook in task: dht.begin({device.hardware.pin}, {device.hardware.sensor_type});
+    }
+    
+    // ----- MicroPython (ESP32/Raspberry Pi Pico) -----
+    @micropython "DHT22 via machine.Pin" {
+      import: from machine import Pin;
+      import: import dht;
+      declare: sensor = dht.DHT22(Pin({hardware.pin}));
+      // Initialization: No explicit init needed, sensor auto-initializes on first measure()
+    }
+    
+    // ----- Rust (embedded-hal) -----
+    @rust "DHT22 via dht-sensor crate" {
+      declare: use dht_sensor::{dht22, DhtReading};
+      declare: use embedded_hal::delay::DelayNs;
+      declare: let mut sensor = dht22::Dht22::new(pins.gpio{hardware.pin});
+      // Initialization: Use on_start hook in task for sensor-specific config
+    }
+  }
+}
+
+// ===== ADDITIONAL METADATA =====
+// Compatible sensors:
+//   - DHT22 (AM2302) - Temperature: -40 to 80°C, Humidity: 0-100%
+//   - DHT11 - Temperature: 0 to 50°C, Humidity: 20-80% (lower accuracy)
+//
+// Wiring:
+//   - VCC → 3.3V or 5V (ESP32: prefer 3.3V)
+//   - GND → Ground
+//   - DATA → GPIO pin (with 4.7k-10k pull-up resistor to VCC)
+//
+// Reading frequency:
+//   - DHT22: Max 0.5 Hz (every 2 seconds)
+//   - DHT11: Max 1 Hz (every 1 second)
+//
+// Error handling:
+//   - Check dht.readTemperature() for NaN (failed reading)
+//   - Retry after 2s delay on failure
+//
+// Power consumption:
+//   - Active: 1-1.5 mA
+//   - Sleep: 50-150 µA

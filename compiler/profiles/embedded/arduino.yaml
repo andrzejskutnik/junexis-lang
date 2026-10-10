@@ -1,0 +1,44 @@
+# Arduino Platform Profile
+# Generic Arduino (Uno/Mega 8-bit AVR)
+# Phase 27.5 - YAML-based platform profiles
+
+version: "1.0"
+platform: "@embedded"
+variant: "arduino"
+
+capabilities:
+  threading: false # No RTOS (8-bit AVR)
+  fileIO: false # No file system
+  networking: false # No WiFi/Ethernet (shields optional)
+  async: false # No async/await on embedded
+  dynamicAllocation: true # Heap available (limited)
+  realTimeClock: false # No RTC (millis() only)
+  hardwareInterrupts: true # External interrupts
+
+limits:
+  maxMemoryBytes: 8192 # 8 KB SRAM (Arduino Mega)
+  maxConcurrentTasks: 4 # Very limited (cooperative scheduling)
+
+metadata:
+  description: "Arduino Uno/Mega 8-bit AVR microcontroller"
+  manufacturer: "Arduino / Atmel"
+  architecture: "AVR (ATmega328P/2560)"
+  frequency: "16MHz"
+  releaseYear: 2010
+
+hardware:
+  ram: "2 KB (Uno) / 8 KB (Mega)"
+  flash: "32 KB (Uno) / 256 KB (Mega)"
+
+recommended:
+  useCases:
+    - "Educational projects"
+    - "Simple sensor reading"
+    - "LED control"
+    - "Basic automation"
+  notRecommended:
+    - "Complex applications (limited RAM/flash)"
+    - "Multi-threading"
+    - "Networking (use ESP32 instead)"
+    - "Real-time requirements (16MHz)"
+    - "Dynamic memory allocation (heap fragmentation)"

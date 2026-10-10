@@ -1,0 +1,142 @@
+// ================================================================================
+//  JUNEXIS SNIPPET: PIR Motion Sensor (HC-SR501 / Generic)
+// ================================================================================
+//
+//  Name:        pir_motion
+//  Description: Generic PIR (Passive Infrared) motion sensor for human detection
+//  Author:      Junexis Team
+//  Version:     1.0.0
+//  Created:     2025-11-06
+//  Tags:        motion, sensor, pir, security, esp32, arduino
+//
+//  Sensor:      HC-SR501 (or compatible PIR modules)
+//  Datasheet:   https://www.epitran.it/ebayDrive/datasheet/44.pdf
+//  Tutorial:    https://randomnerdtutorials.com/esp32-pir-motion-sensor/
+//
+//  Compatible Platforms:
+//    - ESP32 (all variants: C3, S3, WROOM, etc.)
+//    - Arduino (Uno, Mega, Nano, etc.)
+//    - STM32
+//    - Raspberry Pi Pico
+//
+//  Parameters:
+//    - pin: GPIO pin number (default: 14)
+//    - pull_mode: INPUT or INPUT_PULLUP (default: INPUT)
+//
+//  Usage Example:
+//    device sensor_bedroom @embedded(esp32c3) {
+//      reference {
+//        @c/c++ {
+//          import: "pir_motion"
+//        }
+//      }
+//      hardware {
+//        pir_pin: u8 : 14  // Override default pin
+//      }
+//    }
+//
+//  Generated C++ Code:
+//    // No library needed (uses standard pinMode/digitalRead)
+//    pinMode(14, INPUT);
+//    // Reading: digitalRead(14) → HIGH (motion detected) or LOW (no motion)
+//
+// ================================================================================
+
+snippet pir_motion {
+  name: "PIR Motion Sensor (HC-SR501)"
+  description: "Generic PIR (Passive Infrared) motion sensor for human detection"
+  author: "Junexis Team"
+  version: "1.0.0"
+  tags: ["motion", "sensor", "pir", "security"]
+  
+  // Configurable parameters (with defaults)
+  parameters {
+    pin: u8 : 14             // GPIO pin (default: 14)
+    pull_mode: string : "INPUT"  // INPUT or INPUT_PULLUP
+  }
+}
+
+// ===== DEVICE REFERENCE TEMPLATE =====
+device pir_motion_template @embedded {
+  reference {
+    // ----- C/C++ (Arduino/ESP-IDF) -----
+    @c/c++ "PIR Motion Sensor" {
+      library: "# No external library needed";
+      include: <Arduino.h>;
+      declare: const int PIR_PIN = {hardware.pin};
+      // Initialization: Use on_start hook: pinMode(PIR_PIN, {device.hardware.pull_mode});
+    }
+    
+    // ----- MicroPython (ESP32/Raspberry Pi Pico) -----
+    @micropython "PIR via machine.Pin" {
+      import: from machine import Pin;
+      declare: pir = Pin({hardware.pin}, Pin.IN);
+      // Initialization: Pin auto-initializes, no explicit setup needed
+    }
+    
+    // ----- Rust (embedded-hal) -----
+    @rust "PIR via embedded-hal" {
+      declare: {
+        use embedded_hal::digital::InputPin;
+        let pir_pin = pins.gpio{hardware.pin}.into_pull_down_input();
+      }
+      // Initialization: Pin configured in declare, use on_start for additional setup
+    }
+  }
+}
+
+// ===== ADDITIONAL METADATA =====
+// Sensor specifications:
+//   - Detection Range: 3-7 meters (adjustable with potentiometer)
+//   - Detection Angle: 110° cone
+//   - Output: Digital HIGH (motion detected) or LOW (no motion)
+//   - Voltage: 5V (3.3V compatible with level shifter or 3.3V variant)
+//   - Delay Time: 0.5s - 200s (adjustable with potentiometer)
+//
+// Wiring:
+//   - VCC → 5V (or 3.3V for 3.3V variant)
+//   - GND → Ground
+//   - OUT → GPIO pin (ESP32: GPIO 14, Arduino: D2/D3)
+//
+// Potentiometers:
+//   - Sensitivity (Sx): Adjusts detection range (3m - 7m)
+//   - Time Delay (Tx): Adjusts how long output stays HIGH (0.5s - 200s)
+//
+// Jumper Settings:
+//   - H (Repeatable Trigger): Output stays HIGH during motion
+//   - L (Single Trigger): Output goes LOW after delay, even if motion continues
+//
+// Usage Pattern:
+//   ```cpp
+//   void loop() {
+//     int motionState = digitalRead(PIR_PIN);
+//     if (motionState == HIGH) {
+//       Serial.println("Motion detected!");
+//       // Trigger action (turn on light, send alert, etc.)
+//     }
+//   }
+//   ```
+//
+// MicroPython Usage:
+//   ```python
+//   while True:
+//     if pir.value() == 1:
+//       print("Motion detected!")
+//     time.sleep(0.1)
+//   ```
+//
+// Performance:
+//   - Response Time: ~1-2 seconds after motion starts
+//   - Stabilization Time: 30-60 seconds after power-on (warm-up)
+//   - Power: ~65 mA active, ~50 µA standby
+//
+// Common Issues:
+//   - False Positives: Reduce sensitivity, adjust time delay, shield from wind/heat sources
+//   - No Detection: Check VCC voltage (must be 5V or 3.3V depending on variant)
+//   - Delayed Trigger: Wait 30-60s after power-on for sensor stabilization
+//
+// Applications:
+//   - Smart home automation (lights, HVAC)
+//   - Security systems (motion alerts)
+//   - Energy saving (turn off devices when no motion)
+//   - Occupancy tracking (room usage statistics)

@@ -1,0 +1,51 @@
+// Przykład testowania czujnika w JunexisLang
+// Demonstruje potok testowy ze szkieletem testów
+
+struct OdczytCzujnika {
+    temperatura: f32,
+    wilgotnosc: f32,
+    znacznik_czasu: u64
+}
+
+struct WynikTestu {
+    nazwa_testu: Text,
+    zaliczony: Bool,
+    komunikat: Text
+}
+
+// Symulowany czujnik dla testów
+task SztucznyCzujnik() @embedded(esp32c3) -> chan<OdczytCzujnika> {
+    every 1s {
+        var odczyt = OdczytCzujnika {
+            temperatura: 20.0,
+            wilgotnosc: 50.0,
+            znacznik_czasu: 0
+        };
+        send odczyt;
+    }
+}
+
+// Walidator danych z czujnika
+task WalidatorTestow(wejscie: chan<OdczytCzujnika>) @server -> chan<WynikTestu> {
+    for odczyt in wejscie {
+        var zaliczony = odczyt.temperatura > -40.0 and odczyt.temperatura < 85.0;
+        var wynik = WynikTestu {
+            nazwa_testu: "walidacja_zakresu_temperatury",
+            zaliczony: zaliczony,
+            komunikat: "Sprawdzanie zakresu wartości czujnika"
+        };
+        send wynik;
+    }
+}
+
+// Raportowanie wyników testów
+task RaportTestow(wyniki: chan<WynikTestu>) @server {
+    for wynik in wyniki {
+        // Logowanie wyników testu
+    }
+}
+
+pipeline PotokTestowaniaCzujnika {
+    use SztucznyCzujnik -> WalidatorTestow;
+    use WalidatorTestow -> RaportTestow;
+}

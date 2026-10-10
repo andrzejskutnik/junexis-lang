@@ -1,0 +1,142 @@
+// grammar/07-expressions.jnx
+// Pokrycie: wszystkie poziomy precedencji wyrażeń —
+//   assignmentExpression (compoundOperator), conditionalExpression (ternary),
+//   logicalOr/And, equality, relational, additive, multiplicative,
+//   castExpression, unaryExpression, postfixExpression (index, field, ::, call),
+//   primaryExpression (literal, IDENTIFIER, paren, structLiteral, arrayLiteral, jsonLiteral)
+//   declarationStatement (let / const / var), returnStatement, logStatement
+
+struct Vec2 {
+    x: Float
+    y: Float
+}
+
+enum Color { Red, Green, Blue }
+
+fn expressions(a: Int, b: Int, f: Float, s: Text, flag: Bool) -> Int {
+
+    // ─── declarationStatement: let / const / var ──────────────────────
+    let x: Int     = 10
+    const PI: Float = 3.14159
+    var counter: Int = 0
+
+    // ─── declarationStatement bez explicit type ────────────────────────
+    let name = "JunexisLang"
+
+    // ─── assignment expressions (compoundOperator) ────────────────────
+    counter = 0
+    counter += 5
+    counter -= 2
+    counter *= 3
+    counter /= 2
+    counter %= 7
+
+    // ─── conditional / ternary ────────────────────────────────────────
+    let label = a > 0 ? "positive" : "non-positive"
+    let nested = a > 0 ? (b > 0 ? "both" : "only-a") : "neither"
+
+    // ─── logical: or (keyword i ||) ──────────────────────────────────
+    let r1 = flag or false
+    let r2 = flag || false
+
+    // ─── logical: and (keyword i &&) ─────────────────────────────────
+    let r3 = flag and true
+    let r4 = flag && true
+
+    // ─── equality ─────────────────────────────────────────────────────
+    let eq1 = a == b
+    let eq2 = a != b
+
+    // ─── relational ───────────────────────────────────────────────────
+    let rel1 = a < b
+    let rel2 = a > b
+    let rel3 = a <= b
+    let rel4 = a >= b
+
+    // ─── additive ─────────────────────────────────────────────────────
+    let sum  = a + b
+    let diff = a - b
+
+    // ─── multiplicative ───────────────────────────────────────────────
+    let prod  = a * b
+    let quot  = a / b
+    let rem   = a % b
+
+    // ─── cast ─────────────────────────────────────────────────────────
+    let asFloat  = a as Float
+    let asText   = f as Text
+    let asInt    = f as Int
+
+    // ─── unary ────────────────────────────────────────────────────────
+    let neg   = -a
+    let inv   = not flag
+    let ref_  = &a     // adres / borrow (zależnie od semantyki)
+
+    // ─── postfix: field access ────────────────────────────────────────
+    let v = Vec2 { x: 1.0, y: 2.0 }
+    let vx = v.x
+    let vy = v.y
+
+    // ─── postfix: index ───────────────────────────────────────────────
+    let arr = [10, 20, 30]
+    let first  = arr[0]
+    let second = arr[1]
+
+    // ─── postfix: :: enum variant access ─────────────────────────────
+    let c = Color::Green
+    let c2 = Color::Red
+
+    // ─── postfix: function call ───────────────────────────────────────
+    let absVal = abs(a)
+    let clamped = clamp(f, 0.0, 1.0)
+
+    // ─── postfix: chain ───────────────────────────────────────────────
+    let len = s.length()
+    let upper = s.to_upper().trim()
+    let item = get_list()[0].name
+
+    // ─── primaryExpression: struct literal ────────────────────────────
+    let origin = Vec2 { x: 0.0, y: 0.0 }
+    let point  = Vec2 { x: a as Float, y: b as Float }
+
+    // ─── primaryExpression: struct literal z trailing comma ──────────
+    let point2 = Vec2 {
+        x: 3.0,
+        y: 4.0,
+    }
+
+    // ─── primaryExpression: array literal ────────────────────────────
+    let empty: [Int] = []
+    let nums  = [1, 2, 3, 4, 5]
+    let mixed = [a, b, a + b]
+
+    // ─── primaryExpression: array literal z trailing comma ───────────
+    let withTrail = [
+        1,
+        2,
+        3,
+    ]
+
+    // ─── primaryExpression: json literal ─────────────────────────────
+    let meta = { "key": "value", "count": 42 }
+    let nested_json = { "inner": { "a": 1 } }
+    let empty_json = {}
+
+    // ─── primaryExpression: nawiasy parenthetical ────────────────────
+    let parens = (a + b) * (a - b)
+
+    // ─── argumentList: pozycyjne i named ─────────────────────────────
+    let r5 = some_fn(1, 2, 3)
+    let r6 = some_fn(x: 1, y: 2)
+
+    // ─── złożone wyrażenia łączące poziomy ────────────────────────────
+    let complex = (a + b * 2) / (counter - 1) % 10
+    let logic   = (a > 0 and b < 100) or (flag and not (a == b))
+
+    // ─── logStatement ─────────────────────────────────────────────────
+    log("a={a}, b={b}")
+    log("result", complex)
+    log(a, b, f, flag)
+
+    return counter
+}

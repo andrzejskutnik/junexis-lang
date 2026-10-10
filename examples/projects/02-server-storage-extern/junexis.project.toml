@@ -1,0 +1,4 @@
+name = "server-storage-extern"
+entry = "src/main.jnx"
+targets = ["server"]
+outDir = "out"

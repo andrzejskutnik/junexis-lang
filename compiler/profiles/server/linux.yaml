@@ -1,0 +1,45 @@
+# Linux Server Platform Profile
+# Backend services, cloud deployments, microservices
+# Phase 27.5 - YAML-based platform profiles
+
+version: "1.0"
+platform: "@server"
+variant: "linux"
+
+capabilities:
+  threading: true # Full OS threading (pthreads, Go goroutines)
+  fileIO: true # Full file system access
+  networking: true # Full networking stack (TCP/UDP/HTTP/WebSocket)
+  async: true # async/await, coroutines, promises
+  dynamicAllocation: true # Heap available (GB+)
+  realTimeClock: true # System clock
+  hardwareInterrupts: false # No direct hardware access
+
+limits:
+  maxMemoryBytes: 34359738368 # 32 GB (conservative server default)
+  maxConcurrentTasks: 100000 # Go goroutines, C# async tasks, Rust tokio
+
+metadata:
+  description: "Linux server platform (backend services, cloud)"
+  manufacturer: "Various (AWS, Azure, GCP, on-premise)"
+  architecture: "x86_64, ARM64"
+  frequency: "2-4 GHz"
+  releaseYear: 1991
+
+hardware:
+  ram: "32 GB+ (typical cloud VM)"
+  flash: "SSD (100+ GB)"
+
+recommended:
+  useCases:
+    - "REST API services"
+    - "Microservices architecture"
+    - "Database servers"
+    - "Message queue workers"
+    - "WebSocket servers"
+    - "gRPC services"
+    - "Background job processors"
+  notRecommended:
+    - "Real-time embedded systems"
+    - "Direct hardware access (use @embedded)"
+    - "Browser UI (use @report)"

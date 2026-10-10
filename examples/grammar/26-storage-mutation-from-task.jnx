@@ -1,0 +1,41 @@
+// M14.10 — named mutation wywoływana bezpośrednio z tasku Junexis.
+storage HomeData {
+    entity Observation {
+        id: Uuid
+        homeId: Uuid
+        sensor: Text
+        value: Float
+        recordedAt: Time
+        key(id)
+    }
+
+    mutation AddObservation(
+        id: Uuid,
+        homeId: Uuid,
+        sensor: Text,
+        value: Float,
+        recordedAt: Time
+    ) insert single Observation {
+        set id = params.id
+        set homeId = params.homeId
+        set sensor = params.sensor
+        set value = params.value
+        set recordedAt = params.recordedAt
+    }
+}
+
+task RegisterObservation(
+    id: Uuid,
+    homeId: Uuid,
+    sensor: Text,
+    value: Float,
+    recordedAt: Time
+) @server -> HomeData_AddObservationResult {
+    return HomeData_AddObservation(
+        recordedAt: recordedAt,
+        value: value,
+        sensor: sensor,
+        homeId: homeId,
+        id: id
+    )
+}

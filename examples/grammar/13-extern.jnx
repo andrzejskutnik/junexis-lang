@@ -1,0 +1,96 @@
+// grammar/13-extern.jnx
+// Pokrycie: externDeclaration (EXPERIMENTAL D13) — FFI bridge do kodu natywnego,
+//           externTypeDeclaration — opaque handle na typ natywny,
+//           externContractDeclaration — kontrolowana granica kodu użytkownika
+// Obie deklaracje testują opcjonalne parameterList,
+// opcjonalne platformAnnotation i opcjonalną communicationSignature.
+
+// ─── extern task — minimalny (brak parametrów, brak platformy) ───────
+extern task ping
+
+// ─── extern task — z semicolonem ─────────────────────────────────────
+extern task noop;
+
+// ─── extern task — z platformAnnotation ──────────────────────────────
+extern task gpio_init @embedded
+
+// ─── extern task — z parametrami ─────────────────────────────────────
+extern task gpio_set(pin: u8, level: Bool) @embedded
+
+// ─── extern task — z parametrami i communicationSignature ────────────
+extern task adc_read(channel: u8) @embedded -> chan<Float>
+
+// ─── extern task — wiele platform annotations ─────────────────────────
+extern task i2c_scan() @embedded @server -> chan<[u8]>
+
+// ─── extern task — z named platform args ─────────────────────────────
+extern task spi_transfer(data: [u8]) @embedded(esp32c3) -> chan<[u8]>
+
+// ─── extern task — komunikacja queue ─────────────────────────────────
+extern task serial_receive() @embedded -> queue<Text>
+
+// ─── extern task — komunikacja stream ────────────────────────────────
+extern task accel_stream() @embedded -> stream<Float>
+
+// ─── extern task — bez platformy, z communicationSignature ───────────
+extern task compute_fft(samples: [Float]) -> chan<[Float]>
+
+// ─── extern type — minimalny z jedną platform annotation ─────────────
+extern type NativeHandle @embedded
+
+// ─── extern type — z semicolonem ─────────────────────────────────────
+extern type EspNetif @embedded;
+
+// ─── extern type — z wieloma platform annotations ────────────────────
+extern type RustBuffer @embedded @server
+
+// ─── extern type — z named platform args ─────────────────────────────
+extern type HalTimer @embedded(esp32s3)
+
+// ─── extern contract — storage po stronie server ─────────────────────
+struct TempReading {
+    celsius: Float
+}
+
+extern storage TemperatureStore {
+    target server
+    language go
+    file "user/server/storage.go"
+
+    fn save(reading: TempReading)
+    fn recent(limit: Int) -> List<TempReading>
+}
+
+extern task TemperatureStore_save(reading: TempReading) @server
+extern task TemperatureStore_recent(limit: Int) @server -> List<TempReading>
+
+// ─── extern contract — dowolna rola integracyjna ─────────────────────
+struct MotionCommand {
+    x: Float
+}
+
+struct MachinePosition {
+    x: Float
+}
+
+extern motion MotionDriver {
+    target embedded
+    language cpp
+    file "user/embedded/motion_driver.cpp"
+
+    fn enable()
+    fn move_linear(cmd: MotionCommand)
+    fn read_position() -> MachinePosition
+}
+
+extern task MotionDriver_enable() @embedded
+extern task MotionDriver_move_linear(cmd: MotionCommand) @embedded
+extern task MotionDriver_read_position() @embedded -> MachinePosition
+
+// ─── Użycie extern w zwykłym task (dla kontekstu) ────────────────────
+task SensorBridge() @embedded(esp32c3) -> chan<Float> {
+    every 100ms {
+        let raw = recv adc_read(0)
+        send raw
+    }
+}

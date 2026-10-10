@@ -1,0 +1,166 @@
+// grammar/05-control-flow.jnx
+// Pokrycie: ifStatement, forStatement, everyStatement, matchStatement,
+//           delayStatement, returnStatement, wszystkie warianty matchPattern
+
+struct Item {
+    id:    Int
+    name:  Text
+    score: Float
+}
+
+enum Color {
+    Red,
+    Green,
+    Blue,
+    Custom(u8, u8, u8)
+}
+
+enum Msg {
+    Txt(Text),
+    Number(Int),
+    Pair(Int, Text),
+    Empty
+}
+
+// ─── if / else if / else ─────────────────────────────────────────────
+fn classify(n: Int) -> Text {
+    if n < 0 {
+        return "negative"
+    } else if n == 0 {
+        return "zero"
+    } else if n < 10 {
+        return "small"
+    } else {
+        return "large"
+    }
+}
+
+// ─── for...in ─────────────────────────────────────────────────────────
+fn countItems(items: [Item]) -> Int {
+    let count: Int = 0
+    for item in items {
+        count += 1
+    }
+    return count
+}
+
+// ─── for z zagnieżdżonym if ───────────────────────────────────────────
+fn filterHighScore(items: [Item]) -> [Item] {
+    let result: [Item] = []
+    for item in items {
+        if item.score > 0.9 {
+            result = result + [item]
+        }
+    }
+    return result
+}
+
+// ─── every (w kontekście tasku) ───────────────────────────────────────
+task Ticker() @server -> chan<Int> {
+    state tick: Int = 0
+
+    every 100ms {
+        tick += 1
+        send tick
+    }
+}
+
+task VariableInterval(period: chan<Duration>) @server -> chan<Bool> {
+    // every z wyrażeniem (nie tylko literałem)
+    every recv period {
+        send true
+    }
+}
+
+// ─── delay ────────────────────────────────────────────────────────────
+task DelayedProducer() @server -> chan<Text> {
+    send "first"
+    delay 500ms
+    send "second"
+    delay 1s
+    send "third"
+}
+
+// ─── match — wildcard ─────────────────────────────────────────────────
+fn describeAny(n: Int) -> Text {
+    match n {
+        _ -> "something"
+    }
+}
+
+// ─── match — literal patterns ─────────────────────────────────────────
+fn httpStatusText(code: Int) -> Text {
+    match code {
+        200 -> "OK",
+        201 -> "Created",
+        400 -> "Bad Request",
+        404 -> "Not Found",
+        500 -> "Internal Server Error",
+        _   -> "Unknown"
+    }
+}
+
+// ─── match — binding (IDENTIFIER) ─────────────────────────────────────
+fn double(n: Int) -> Int {
+    match n {
+        x -> x * 2
+    }
+}
+
+// ─── match — enum variant bez danych ──────────────────────────────────
+fn colorName(c: Color) -> Text {
+    match c {
+        Color::Red   -> "red",
+        Color::Green -> "green",
+        Color::Blue  -> "blue",
+        Color::Custom(r, g, b) -> "custom"
+    }
+}
+
+// ─── match — enum variant z danymi (jeden i wiele) ────────────────────
+fn handleMsg(m: Msg) -> Text {
+    match m {
+        Msg::Txt(t)    -> t,
+        Msg::Number(n)  -> "number",
+        Msg::Pair(n, t) -> t,
+        Msg::Empty      -> ""
+    }
+}
+
+// ─── match — wartość bool ─────────────────────────────────────────────
+fn boolLabel(b: Bool) -> Text {
+    match b {
+        true  -> "yes",
+        false -> "no"
+    }
+}
+
+// ─── match z blokiem { } w armie ──────────────────────────────────────
+fn processColor(c: Color) -> u32 {
+    match c {
+        Color::Red -> {
+            log("got red")
+            return 0xFF0000
+        },
+        Color::Green -> {
+            log("got green")
+            return 0x00FF00
+        },
+        _ -> {
+            return 0x000000
+        }
+    }
+}
+
+// ─── match zagnieżdżony ───────────────────────────────────────────────
+fn nestedMatch(c: Color, n: Int) -> Text {
+    match c {
+        Color::Red -> {
+            match n {
+                0 -> "red-zero",
+                _ -> "red-other"
+            }
+        },
+        _ -> "not-red"
+    }
+}

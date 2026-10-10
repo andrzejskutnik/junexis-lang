@@ -1,0 +1,17 @@
+import domain::observations
+
+extern storage HomeStore {
+    target server
+    language go
+    file "user/server/home_store.go"
+
+    fn save(observation: HomeObservation) -> SaveResult
+    fn snapshot(room: Text, limit: Int) -> HomeSnapshot
+    fn rollback_probe(observation: HomeObservation) -> Bool
+    fn health_check() -> Bool
+}
+
+extern task HomeStore_save(observation: HomeObservation) @server -> SaveResult
+extern task HomeStore_snapshot(room: Text, limit: Int) @server -> HomeSnapshot
+extern task HomeStore_rollback_probe(observation: HomeObservation) @server -> Bool
+extern task HomeStore_health_check() @server -> Bool

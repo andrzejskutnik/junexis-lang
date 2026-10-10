@@ -1,0 +1,4 @@
+CREATE TABLE IF NOT EXISTS golden_audit (
+    id INTEGER PRIMARY KEY,
+    event TEXT NOT NULL
+);

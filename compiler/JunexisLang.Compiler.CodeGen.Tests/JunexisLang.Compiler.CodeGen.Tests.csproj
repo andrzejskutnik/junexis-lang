@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\JunexisLang.Compiler.Core\JunexisLang.Compiler.Core.csproj" />
+    <ProjectReference Include="..\JunexisLang.Compiler.IR\JunexisLang.Compiler.IR.csproj" />
+    <ProjectReference Include="..\JunexisLang.Compiler.CodeGen\JunexisLang.Compiler.CodeGen.csproj" />
+    <ProjectReference Include="..\JunexisLang.Compiler.Topology\JunexisLang.Compiler.Topology.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\conformance\semantic-scenarios.json"
+          Link="conformance\semantic-scenarios.json"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

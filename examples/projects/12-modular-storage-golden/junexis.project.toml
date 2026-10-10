@@ -1,0 +1,5 @@
+name = "modular-storage-golden"
+entry = "src/main.jnx"
+sourceRoots = ["src"]
+targets = ["server", "report"]
+outDir = "out"

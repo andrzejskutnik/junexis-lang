@@ -1,0 +1,22 @@
+// M13.9 — źródło jednego typowanego klienta Query Plan dla @server.
+storage HomeData {
+    entity Observation {
+        id: Uuid
+        homeId: Uuid
+        sensor: Text
+        value: Float
+        recordedAt: Time
+        key(id)
+    }
+
+    query RecentObservations(homeId: Uuid) from Observation {
+        filter homeId == params.homeId and value > 0.0
+        project sensor as sensorName, value, recordedAt
+        sort recordedAt desc
+        limit 20
+    }
+}
+
+task HomeApi() @server {
+    log("storage query client ready")
+}

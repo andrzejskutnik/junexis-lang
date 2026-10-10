@@ -1,0 +1,52 @@
+// Przykład serwisu REST API w JunexisLang
+// Demonstruje deklaratywne endpointy HTTP dla zarządzania użytkownikami
+
+struct Uzytkownik {
+    id: u64,
+    nazwa: Text,
+    email: Text,
+    rola: RolaUzytkownika
+}
+
+struct ZapytanieUtworzUzytkownika {
+    nazwa: Text,
+    email: Text,
+    rola: RolaUzytkownika
+}
+
+struct OdpowiedzUzytkownik {
+    id: u64,
+    nazwa: Text,
+    email: Text
+}
+
+enum RolaUzytkownika {
+    Administrator,
+    Uzytkownik,
+    Gosc
+}
+
+extern task lista_uzytkownikow() @server -> [Uzytkownik]
+extern task utworz_uzytkownika(zapytanie: ZapytanieUtworzUzytkownika) @server -> Uzytkownik
+extern task znajdz_uzytkownika(id: u64) @server -> Uzytkownik
+
+// Taski — czysta logika domenowa (D7: task nie zna protokołu)
+task PobierzUzytkownikow() @server -> [Uzytkownik] {
+    return lista_uzytkownikow();
+}
+
+task UtworzUzytkownika(zapytanie: ZapytanieUtworzUzytkownika) @server -> Uzytkownik {
+    var nowy = utworz_uzytkownika(zapytanie);
+    return nowy;
+}
+
+task PobierzUzytkownika(id: u64) @server -> Uzytkownik {
+    return znajdz_uzytkownika(id);
+}
+
+// Binding protokołu REST — osobna deklaracja top-level (D7)
+protocol rest {
+    GET("/uzytkownicy",       PobierzUzytkownikow())
+    POST("/uzytkownicy",      UtworzUzytkownika(body zapytanie: ZapytanieUtworzUzytkownika))
+    GET("/uzytkownicy/{id}",  PobierzUzytkownika(path id: u64))
+}

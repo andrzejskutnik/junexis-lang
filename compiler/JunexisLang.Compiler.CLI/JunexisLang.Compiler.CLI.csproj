@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <RuntimeIdentifiers>win-x64;linux-x64;osx-arm64</RuntimeIdentifiers>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- Pakuj jako globalny dotnet tool -->
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>junexis-compiler</ToolCommandName>
+    <PackageId>Junexis.Compiler.CLI</PackageId>
+    <Description>Junexis Lang compiler and checker CLI tool</Description>
+    <PackageTags>junexis;compiler;dotnet-tool</PackageTags>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <JunexisSdkRoot Condition="'$(JunexisSdkRoot)' == ''">$(MSBuildProjectDirectory)/../../../junexis-sdk</JunexisSdkRoot>
+    <JunexisRegistryEventContract Condition="'$(JunexisRegistryEventContract)' == '' and Exists('$(JunexisSdkRoot)/schemas/junexis.registry-event-0.1.schema.json')">$(JunexisSdkRoot)/schemas/junexis.registry-event-0.1.schema.json</JunexisRegistryEventContract>
+    <JunexisRegistryEventContract Condition="'$(JunexisRegistryEventContract)' == ''">$(MSBuildProjectDirectory)/Contracts/junexis.registry-event-0.1.schema.json</JunexisRegistryEventContract>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <RegistryEventContract Include="$(JunexisRegistryEventContract)" />
+    <EmbeddedResource Include="@(RegistryEventContract)"
+                      LogicalName="Junexis.Compiler.Contracts.%(Filename)%(Extension)" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleToAttribute">
+      <_Parameter1>JunexisLang.Compiler.CLI.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <Target Name="VerifyRegistryEventContract" BeforeTargets="BeforeBuild">
+    <Error Condition="!Exists('%(RegistryEventContract.Identity)')"
+           Text="Brak kontraktu zdarzeń Registry: %(RegistryEventContract.Identity)" />
+  </Target>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\JunexisLang.Compiler.Core\JunexisLang.Compiler.Core.csproj" />
+    <ProjectReference Include="..\JunexisLang.Compiler.IR\JunexisLang.Compiler.IR.csproj" />
+    <ProjectReference Include="..\JunexisLang.Compiler.Topology\JunexisLang.Compiler.Topology.csproj" />
+    <ProjectReference Include="..\JunexisLang.Compiler.CodeGen\JunexisLang.Compiler.CodeGen.csproj" />
+    <ProjectReference Include="..\JunexisLang.Compiler.LspHost\JunexisLang.Compiler.LspHost.csproj" />
+  </ItemGroup>
+
+</Project>

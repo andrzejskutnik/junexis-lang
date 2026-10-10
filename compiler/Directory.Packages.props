@@ -1,0 +1,35 @@
+<Project>
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <!-- ANTLR4 -->
+  <ItemGroup>
+    <PackageVersion Include="Antlr4.Runtime.Standard" Version="4.13.1" />
+    <PackageVersion Include="Antlr4BuildTasks" Version="12.10.0" />
+    <PackageVersion Include="Microsoft.Build.Utilities.Core" Version="17.8.43" />
+  </ItemGroup>
+
+  <!-- Language / parsing -->
+  <ItemGroup>
+    <PackageVersion Include="YamlDotNet" Version="16.3.0" />
+  </ItemGroup>
+
+  <!-- CLI -->
+  <ItemGroup>
+    <PackageVersion Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
+  </ItemGroup>
+
+  <!-- LSP -->
+  <ItemGroup>
+    <PackageVersion Include="OmniSharp.Extensions.LanguageServer" Version="0.19.9" />
+  </ItemGroup>
+
+  <!-- Test -->
+  <ItemGroup>
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageVersion Include="coverlet.collector" Version="6.0.4" />
+  </ItemGroup>
+</Project>

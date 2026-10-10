@@ -1,0 +1,79 @@
+name: Junexis Lang CI
+
+on:
+  push:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  SOLUTION: compiler/JunexisLang.Compiler.slnx
+
+jobs:
+  build-test-validate:
+    name: Build, test and validate examples
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.201
+          cache: true
+          cache-dependency-path: |
+            compiler/Directory.Packages.props
+            compiler/**/*.csproj
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.25.x
+          cache: false
+
+      - name: Restore
+        run: dotnet restore "$SOLUTION"
+
+      - name: Build
+        run: dotnet build "$SOLUTION" --configuration Release --no-restore
+
+      - name: Test
+        run: >-
+          dotnet test "$SOLUTION"
+          --configuration Release
+          --no-build
+          --logger "trx;LogFilePrefix=junexis-tests"
+          --results-directory TestResults
+
+      - name: Validate representative examples
+        run: |
+          dotnet run --project compiler/JunexisLang.Compiler.CLI/JunexisLang.Compiler.CLI.csproj \
+            --configuration Release --no-build -- \
+            validate-example examples/01-temperature-monitor.jnx
+          dotnet run --project compiler/JunexisLang.Compiler.CLI/JunexisLang.Compiler.CLI.csproj \
+            --configuration Release --no-build -- \
+            validate-example examples/02-ecommerce-api.jnx
+          dotnet run --project compiler/JunexisLang.Compiler.CLI/JunexisLang.Compiler.CLI.csproj \
+            --configuration Release --no-build -- \
+            validate-example examples/13-minimal-pipeline.jnx
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: compiler-test-results
+          path: TestResults/**/*.trx
+          if-no-files-found: ignore

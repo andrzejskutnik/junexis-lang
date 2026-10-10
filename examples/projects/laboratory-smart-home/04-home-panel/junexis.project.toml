@@ -1,0 +1,4 @@
+name = "smart-home-panel"
+entry = "src/main.jnx"
+targets = ["server"]
+outDir = "out"

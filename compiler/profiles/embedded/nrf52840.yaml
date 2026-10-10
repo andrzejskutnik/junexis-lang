@@ -1,0 +1,54 @@
+# nRF52840 Platform Profile
+# Nordic Semiconductor ARM Cortex-M4 with BLE 5.0
+# Phase 27.5 - YAML-based platform profiles
+
+version: "1.0"
+platform: "@embedded"
+variant: "nrf52840"
+
+capabilities:
+  threading: true # FreeRTOS/Zephyr RTOS
+  fileIO: false # No file system by default
+  networking: true # BLE 5.0 (no WiFi)
+  async: false # No async/await on embedded
+  dynamicAllocation: true # Heap available
+  realTimeClock: true # RTC peripheral
+  hardwareInterrupts: true # GPIOTE interrupts
+
+limits:
+  maxMemoryBytes: 262144 # 256 KB SRAM
+  maxConcurrentTasks: 16 # RTOS tasks limit
+
+metadata:
+  description: "nRF52840 ARM Cortex-M4 with BLE 5.0 (Nordic)"
+  manufacturer: "Nordic Semiconductor"
+  architecture: "ARM Cortex-M4F"
+  frequency: "64MHz"
+  releaseYear: 2017
+
+hardware:
+  ram: "256 KB SRAM"
+  flash: "1 MB"
+  bluetooth: "BLE 5.0, 2 Mbps PHY"
+
+recommended:
+  useCases:
+    - "Bluetooth Low Energy peripherals"
+    - "Wearable devices"
+    - "Battery-powered sensors"
+    - "Mesh networking (Bluetooth Mesh)"
+    - "NFC tag emulation"
+  notRecommended:
+    - "WiFi applications (no WiFi, use ESP32)"
+    - "High data throughput (BLE limited to 1-2 Mbps)"
+    - "Always-on applications (optimize for power)"
+
+constraints:
+  - type: "info"
+    severity: "info"
+    message: "Networking limited to BLE 5.0 (no WiFi/Ethernet)"
+    code: "BLE_ONLY"
+  - type: "warning"
+    severity: "warning"
+    message: "Designed for battery power - use sleep modes extensively"
+    code: "POWER_OPTIMIZATION"

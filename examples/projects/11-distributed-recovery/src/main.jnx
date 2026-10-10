@@ -1,0 +1,135 @@
+// Laboratorium Junexis: jeden dom przechodzący przez trzy środowiska.
+
+struct DeviceHeartbeat {
+    device_id: Text
+    boot_id: Text
+    sequence: Int
+    safe_state: Bool
+    observed_at: Time
+}
+
+struct BoundaryObservation {
+    device_id: Text
+    previous_boot_id: Text
+    current_boot_id: Text
+    connection_generation: Int
+    status: Text
+    reason: Text
+    sequence: Int
+    safe_state: Bool
+    decided_at: Time
+}
+
+extern task device_boot_id() @embedded -> Text
+
+task HomeDeviceNode() @embedded(esp32c3) -> chan<DeviceHeartbeat> {
+    state sequence: Int = 0
+
+    every 1s {
+        sequence = sequence + 1
+        send DeviceHeartbeat {
+            device_id: "living-room-sensor",
+            boot_id: device_boot_id(),
+            sequence: sequence,
+            safe_state: true,
+            observed_at: now()
+        }
+    }
+}
+
+task HomeCoordinator(
+    heartbeats: chan<DeviceHeartbeat>
+) @server -> chan<BoundaryObservation> {
+    state last_boot_id: Text = ""
+    state connection_generation: Int = 0
+    state last_sequence: Int = 0
+    state last_status: Text = ""
+
+    for heartbeat in heartbeats {
+        let previous_boot = last_boot_id
+        let first_heartbeat = previous_boot == ""
+        let boot_changed = previous_boot != "" && heartbeat.boot_id != previous_boot
+
+        if first_heartbeat {
+            last_boot_id = heartbeat.boot_id
+            last_sequence = heartbeat.sequence
+            last_status = "online"
+
+            send BoundaryObservation {
+                device_id: heartbeat.device_id,
+                previous_boot_id: "",
+                current_boot_id: heartbeat.boot_id,
+                connection_generation: connection_generation,
+                status: "online",
+                reason: "first-heartbeat",
+                sequence: heartbeat.sequence,
+                safe_state: heartbeat.safe_state,
+                decided_at: now()
+            }
+        }
+
+        if !first_heartbeat && !boot_changed {
+            last_sequence = heartbeat.sequence
+            last_status = "online"
+
+            send BoundaryObservation {
+                device_id: heartbeat.device_id,
+                previous_boot_id: previous_boot,
+                current_boot_id: heartbeat.boot_id,
+                connection_generation: connection_generation,
+                status: "online",
+                reason: "heartbeat-confirmed",
+                sequence: heartbeat.sequence,
+                safe_state: heartbeat.safe_state,
+                decided_at: now()
+            }
+        }
+
+        if boot_changed {
+            connection_generation = connection_generation + 1
+            last_boot_id = heartbeat.boot_id
+            last_sequence = heartbeat.sequence
+            last_status = "rejoined"
+
+            send BoundaryObservation {
+                device_id: heartbeat.device_id,
+                previous_boot_id: previous_boot,
+                current_boot_id: heartbeat.boot_id,
+                connection_generation: connection_generation,
+                status: "rejoined",
+                reason: "device-boot-identity-changed",
+                sequence: heartbeat.sequence,
+                safe_state: heartbeat.safe_state,
+                decided_at: now()
+            }
+        }
+    }
+}
+
+task HomeReport(
+    observations: chan<BoundaryObservation>
+) @report {}
+
+pipeline ThreeEnvironmentHome {
+    use HomeDeviceNode -> HomeCoordinator
+    use HomeCoordinator -> HomeReport
+}
+
+deployment ThreeEnvironmentLaboratory {
+    target embedded {
+        HomeDeviceNode @embedded(esp32c3) {}
+    }
+    target server {
+        HomeCoordinator @server {}
+    }
+    target report {
+        HomeReport @report {}
+    }
+}
+
+narrative "Three-environment home" {
+    intent "Show a working home crossing embedded, server and report boundaries before testing interruption and rejoin."
+    stakeholders ["learner", "operator"]
+    trace sampled(rate: 100%)
+    applies_to { HomeDeviceNode, HomeCoordinator, HomeReport }
+}

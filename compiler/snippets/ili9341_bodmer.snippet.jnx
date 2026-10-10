@@ -1,0 +1,172 @@
+// ================================================================================
+//  JUNEXIS SNIPPET: ILI9341 TFT Display 240x320 (Bodmer TFT_eSPI)
+// ================================================================================
+//
+//  Name:        ili9341_bodmer
+//  Description: Bodmer TFT_eSPI library for ILI9341 240x320 color TFT display via SPI
+//  Author:      Junexis Team
+//  Version:     1.0.0
+//  Created:     2025-11-06
+//  Tags:        display, tft, ili9341, bodmer, spi, esp32, color
+//
+//  Library:     Bodmer TFT_eSPI (optimized for ESP32)
+//  Datasheet:   https://www.displayfuture.com/Display/datasheet/controller/ILI9341.pdf
+//  Tutorial:    https://github.com/Bodmer/TFT_eSPI
+//
+//  Compatible Platforms:
+//    - ESP32 (all variants: C3, S3, WROOM, etc.)
+//    - ESP8266
+//    - STM32
+//    - Raspberry Pi Pico
+//
+//  Parameters:
+//    - tft_cs: SPI Chip Select pin (default: 5)
+//    - tft_dc: Data/Command pin (default: 16)
+//    - tft_rst: Reset pin (default: 17)
+//    - tft_mosi: SPI MOSI pin (default: 23)
+//    - tft_sclk: SPI Clock pin (default: 18)
+//
+//  Usage Example:
+//    device esp32_probe_1 @embedded(esp32c3) {
+//      reference {
+//        @c/c++ {
+//          import: "ili9341_bodmer"
+//        }
+//      }
+//      hardware {
+//        tft_cs: u8 : 5
+//        tft_dc: u8 : 16
+//        tft_rst: u8 : 17
+//      }
+//    }
+//
+//  Generated C++ Code:
+//    #include <TFT_eSPI.h>
+//    TFT_eSPI tft = TFT_eSPI();
+//    tft.init();
+//    tft.setRotation(1);
+//
+// ================================================================================
+
+snippet ili9341_bodmer {
+  name: "ILI9341 TFT Display 240x320 (Bodmer)"
+  description: "Bodmer TFT_eSPI library for ILI9341 240x320 color TFT display via SPI"
+  author: "Junexis Team"
+  version: "1.0.0"
+  tags: ["display", "tft", "ili9341", "bodmer", "spi", "color"]
+  
+  // Configurable parameters (with defaults)
+  parameters {
+    tft_cs: u8 : 5       // SPI Chip Select (default: GPIO 5)
+    tft_dc: u8 : 16      // Data/Command (default: GPIO 16)
+    tft_rst: u8 : 17     // Reset (default: GPIO 17, -1 for no reset pin)
+    tft_mosi: u8 : 23    // SPI MOSI (default: GPIO 23)
+    tft_sclk: u8 : 18    // SPI Clock (default: GPIO 18)
+    rotation: u8 : 1     // Screen rotation (0-3, default: 1 = landscape)
+  }
+}
+
+// ===== DEVICE REFERENCE TEMPLATE =====
+device ili9341_bodmer_template @embedded {
+  reference {
+    // ----- C/C++ (Arduino/ESP-IDF) -----
+    @c/c++ "ILI9341 TFT Display" {
+      library: "bodmer/TFT_eSPI@^2.5.43";
+      include: <TFT_eSPI.h>;
+      declare: TFT_eSPI tft = TFT_eSPI();
+      // Initialization: Use on_start hook: tft.init(); tft.setRotation({device.hardware.rotation}); tft.fillScreen(TFT_BLACK);
+    }
+    
+    // ----- MicroPython (ESP32) -----
+    @micropython "ILI9341 via ili9341 library" {
+      import: {
+        from machine import Pin, SPI;
+        import ili9341;
+      }
+      declare: {
+        spi = SPI(1, baudrate=40000000, sck=Pin({hardware.tft_sclk}), mosi=Pin({hardware.tft_mosi}));
+        display = ili9341.ILI9341(spi, cs=Pin({hardware.tft_cs}), dc=Pin({hardware.tft_dc}), rst=Pin({hardware.tft_rst}));
+      }
+      // Initialization: Use on_start hook: display.fill(0)
+    }
+    
+    // ----- Rust (embedded-hal) -----
+    @rust "ILI9341 via ili9341 crate" {
+      declare: {
+        use ili9341::{Ili9341, Orientation};
+        use embedded_hal::spi::SpiDevice;
+        let spi = /* SPI setup */;
+        let dc = pins.gpio{hardware.tft_dc}.into_push_pull_output();
+        let rst = pins.gpio{hardware.tft_rst}.into_push_pull_output();
+        let mut display = Ili9341::new(spi, dc, rst, &mut delay, Orientation::Landscape, ili9341::DisplaySize240x320).unwrap();
+      }
+      // Initialization: Display auto-initialized in Ili9341::new(), use on_start for custom setup
+    }
+  }
+}
+
+// ===== ADDITIONAL METADATA =====
+// Display specifications:
+//   - Resolution: 240x320 pixels (QVGA)
+//   - Color Depth: 16-bit (RGB565, 65K colors)
+//   - Interface: SPI (4-wire)
+//   - Voltage: 3.3V (5V tolerant on some breakouts)
+//   - Touch: Optional (resistive or capacitive touchscreen)
+//
+// SPI Wiring:
+//   - VCC → 3.3V (or 5V if supported)
+//   - GND → Ground
+//   - CS (Chip Select) → GPIO 5 (configurable)
+//   - RESET → GPIO 17 (configurable, or -1 for shared reset)
+//   - DC (Data/Command) → GPIO 16 (configurable)
+//   - MOSI (SDA) → GPIO 23 (hardware SPI)
+//   - SCK (SCL) → GPIO 18 (hardware SPI)
+//   - LED (Backlight) → 3.3V (or PWM pin for brightness control)
+//   - MISO → Not used for display (optional for touchscreen)
+//
+// TFT_eSPI Configuration (User_Setup.h):
+//   - Define ILI9341_DRIVER
+//   - Set TFT_WIDTH 240, TFT_HEIGHT 320
+//   - Define pin connections: TFT_CS, TFT_DC, TFT_RST, TFT_MOSI, TFT_SCLK
+//   - Set SPI frequency: #define SPI_FREQUENCY 40000000 (40 MHz)
+//
+// Screen Rotation:
+//   - 0: Portrait (USB port on top)
+//   - 1: Landscape (USB port on left)
+//   - 2: Portrait inverted (USB port on bottom)
+//   - 3: Landscape inverted (USB port on right)
+//
+// Display Operations:
+//   ```cpp
+//   tft.fillScreen(TFT_BLACK);              // Clear screen
+//   tft.setTextColor(TFT_WHITE, TFT_BLACK); // Set text color + background
+//   tft.setTextSize(2);                     // Set text size (1-7)
+//   tft.setCursor(10, 10);                  // Set cursor position
+//   tft.println("Hello World!");            // Print text
+//   tft.drawRect(x, y, w, h, color);        // Draw rectangle
+//   tft.fillCircle(x, y, r, color);         // Draw filled circle
+//   tft.pushImage(x, y, w, h, image);       // Draw bitmap image
+//   ```
+//
+// Performance:
+//   - SPI Speed: 40 MHz (ESP32), 27 MHz (ESP8266)
+//   - Frame Rate: ~30-60 FPS (full screen update)
+//   - Text Rendering: ~1-2 ms per character
+//   - Power: ~100 mA with backlight, ~20 mA backlight off
+//
+// Common Issues:
+//   - White Screen → Check TFT_CS, TFT_DC, TFT_RST pin definitions
+//   - Inverted Colors → Wrong color mode (RGB vs BGR)
+//   - Flickering → Reduce SPI frequency or add decoupling capacitors
+//   - Touchscreen Not Working → Check MISO connection + XPT2046 library
+//
+// Backlight Control:
+//   - Connect LED pin to PWM-capable GPIO for brightness control
+//   - declare: ledcSetup(), ledcAttachPin(), ledcWrite() (ESP32)
+//   - Example: 0 (off) to 255 (full brightness)
+//
+// Applications:
+//   - Smart home dashboards (temperature, humidity, time)
+//   - IoT monitoring (sensor graphs, status indicators)
+//   - Voltage meters (real-time waveform display)
+//   - Embedded UI (buttons, menus, settings)

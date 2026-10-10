@@ -1,0 +1,90 @@
+// Laboratorium Junexis — Dom 2: pomiar staje się decyzją.
+// Ten sam czujnik publikuje dwa przypadki, a osobne zadanie stosuje regułę domu.
+
+struct SensorReading {
+    room: Text
+    air_quality: Float
+    observed_at: Time
+}
+
+struct HomeDecision {
+    room: Text
+    air_quality: Float
+    threshold: Float
+    outcome: Text
+    reason: Text
+    decided_at: Time
+}
+
+task LivingRoomSensor() @server -> chan<SensorReading> {
+    config {
+        room: Text : "salon"
+        interval: Duration : 2s
+    }
+
+    state scenario_step: Int = 0
+
+    every config.interval {
+        scenario_step = scenario_step + 1
+
+        if scenario_step == 1 {
+            send SensorReading {
+                room: config.room,
+                air_quality: 420.0,
+                observed_at: now()
+            }
+        }
+
+        if scenario_step == 2 {
+            send SensorReading {
+                room: config.room,
+                air_quality: 1250.0,
+                observed_at: now()
+            }
+            scenario_step = 0
+        }
+    }
+}
+
+task AirQualityDecision(readings: chan<SensorReading>) @server -> chan<HomeDecision> {
+    config {
+        threshold: Float : 1000.0
+    }
+
+    loop {
+        let reading = recv readings
+
+        if reading.air_quality <= config.threshold {
+            send HomeDecision {
+                room: reading.room,
+                air_quality: reading.air_quality,
+                threshold: config.threshold,
+                outcome: "observe",
+                reason: "pomiar nie przekracza progu",
+                decided_at: now()
+            }
+        }
+
+        if reading.air_quality > config.threshold {
+            send HomeDecision {
+                room: reading.room,
+                air_quality: reading.air_quality,
+                threshold: config.threshold,
+                outcome: "enable-ventilation",
+                reason: "pomiar przekracza prog",
+                decided_at: now()
+            }
+        }
+    }
+}
+
+task DecisionPreview(decisions: chan<HomeDecision>) @server {
+    for decision in decisions {
+        log("DECYZJA pokoj={decision.room} pomiar={decision.air_quality:.0f} ppm prog={decision.threshold:.0f} ppm wynik={decision.outcome} powod={decision.reason}")
+    }
+}
+
+pipeline FirstDecisionFlow {
+    use LivingRoomSensor -> AirQualityDecision
+    use AirQualityDecision -> DecisionPreview
+}

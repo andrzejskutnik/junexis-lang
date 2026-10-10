@@ -1,0 +1,72 @@
+{
+  "schemaVersion": "junexis.laboratory/preview-1",
+  "id": "smart-home",
+  "name": "Dom, który zauważa i reaguje",
+  "stages": [
+    "poznaj",
+    "eksperymentuj",
+    "przejmij-kontrole"
+  ],
+  "status": "running",
+  "hardwareRequired": false,
+  "execution": {
+    "mode": "simulation",
+    "deterministic": true,
+    "hardwareFallback": false,
+    "scenarioSeed": "smart-home-m19-7-1"
+  },
+  "scenario": "air-quality-and-sensor-loss",
+  "entrypoint": "/laboratory/",
+  "rooms": [
+    "kitchen",
+    "bedroom",
+    "living-room"
+  ],
+  "capabilities": [
+    "live-room-state",
+    "causal-timeline",
+    "narrative-runtime-evidence",
+    "build-bundle-identity",
+    "controlled-failure",
+    "deterministic-reset",
+    "runtime-threshold-experiment",
+    "communication-delay-experiment",
+    "failure-policy-experiment",
+    "effective-runtime-configuration",
+    "automatic-recovery",
+    "operator-approved-recovery",
+    "bounded-evidence-retention",
+    "bounded-overload",
+    "durable-evidence",
+    "process-restart-recovery",
+    "restart-is-not-recovery",
+    "interrupted-buffer-is-explicit"
+  ],
+  "controls": [
+    "force-sensor-failure",
+    "configure-air-quality-threshold",
+    "configure-communication-delay",
+    "configure-failure-policy",
+    "configure-recovery-mode",
+    "configure-recovery-delay",
+    "configure-evidence-limit",
+    "run-bounded-overload",
+    "approve-or-reject-recovery",
+    "reset-to-automatic-scenario"
+  ],
+  "checkpoints": [
+    "home-started",
+    "ventilation-enabled",
+    "sensor-loss-detected",
+    "safe-state-selected",
+    "sensor-recovered",
+    "experiment-applied",
+    "configured-policy-observed",
+    "automatic-recovery-completed",
+    "manual-recovery-approved",
+    "overload-recovered",
+    "durable-state-restored",
+    "interrupted-buffer-closed",
+    "recovery-approved-after-restart"
+  ]
+}

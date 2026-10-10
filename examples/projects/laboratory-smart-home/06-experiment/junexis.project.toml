@@ -1,0 +1,5 @@
+name = "smart-home-experiment"
+entry = "src/main.jnx"
+targets = ["server"]
+outDir = "out"
+

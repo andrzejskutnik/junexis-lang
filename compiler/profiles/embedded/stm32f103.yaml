@@ -1,0 +1,43 @@
+# STM32F103 Platform Profile
+# ARM Cortex-M3 microcontroller (Blue Pill)
+# Phase 27.5 - YAML-based platform profiles
+
+version: "1.0"
+platform: "@embedded"
+variant: "stm32f103"
+
+capabilities:
+  threading: false # No RTOS (limited RAM)
+  fileIO: false # No file system
+  networking: false # No WiFi/Ethernet
+  async: false # No async/await on embedded
+  dynamicAllocation: true # Heap available
+  realTimeClock: true # RTC peripheral
+  hardwareInterrupts: true # NVIC interrupts
+
+limits:
+  maxMemoryBytes: 20480 # 20 KB SRAM (Blue Pill variant)
+  maxConcurrentTasks: 4 # Very limited
+
+metadata:
+  description: "STM32F103 ARM Cortex-M3 microcontroller (Blue Pill)"
+  manufacturer: "STMicroelectronics"
+  architecture: "ARM Cortex-M3"
+  frequency: "72MHz"
+  releaseYear: 2007
+
+hardware:
+  ram: "20 KB SRAM"
+  flash: "64 KB"
+
+recommended:
+  useCases:
+    - "Simple sensor nodes"
+    - "USB HID devices"
+    - "Low-cost prototypes"
+    - "Educational projects"
+  notRecommended:
+    - "Complex applications (limited RAM)"
+    - "Multi-threading (use STM32F4 instead)"
+    - "Networking (no WiFi/Ethernet)"
+    - "File storage (no SD card)"

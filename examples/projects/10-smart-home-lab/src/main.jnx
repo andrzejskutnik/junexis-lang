@@ -1,0 +1,351 @@
+// Laboratorium Junexis: Dom, który zauważa i reaguje.
+// Pierwszy pionowy zakres wykonawczy działa bez dodatkowego sprzętu.
+
+struct SensorReading {
+    room: Text
+    celsius: Float
+    humidity: Float
+    air_quality: Float
+    motion: Bool
+    online: Bool
+    sequence: Int
+    observed_at: Time
+}
+
+struct HomeDecision {
+    decision_id: Text
+    room: Text
+    rule: Text
+    reason: Text
+    action: Text
+    safe: Bool
+    sequence: Int
+    decided_at: Time
+}
+
+struct FaultCommand {
+    active: Bool
+}
+
+struct ExperimentCommand {
+    air_quality_threshold: Float
+    communication_delay_ms: Int
+    failure_policy: Text
+}
+
+struct ControlCommand {
+    air_quality_threshold: Float
+    communication_delay_ms: Int
+    failure_policy: Text
+    recovery_mode: Text
+    recovery_delay_ms: Int
+    evidence_limit: Int
+}
+
+struct RecoveryCommand {
+    approved: Bool
+}
+
+struct OverloadCommand {
+    burst_size: Int
+    buffer_limit: Int
+    consumer_delay_ms: Int
+}
+
+struct RoomState {
+    room: Text
+    celsius: Float
+    humidity: Float
+    air_quality: Float
+    motion: Bool
+    online: Bool
+    sequence: Int
+}
+
+struct LaboratoryEvent {
+    event_id: Text
+    kind: Text
+    room: Text
+    title: Text
+    detail: Text
+    cause: Text
+    effect: Text
+    sequence: Int
+    occurred_at: Text
+}
+
+struct LaboratoryState {
+    scenario: Text
+    execution_mode: Text
+    hardware_connected: Bool
+    stage: Text
+    sensor_online: Bool
+    fault_forced: Bool
+    air_quality_threshold: Float
+    communication_delay_ms: Int
+    failure_policy: Text
+    experiment_revision: Int
+    recovery_mode: Text
+    recovery_delay_ms: Int
+    evidence_limit: Int
+    control_revision: Int
+    recovery_pending: Bool
+    recovery_fresh_evidence: Int
+    recovery_required_evidence: Int
+    evidence_persistent: Bool
+    evidence_path: Text
+    restored_after_restart: Bool
+    restored_event_count: Int
+    overload_active: Bool
+    overload_burst_size: Int
+    overload_buffer_limit: Int
+    overload_consumer_delay_ms: Int
+    overload_accepted: Int
+    overload_dropped: Int
+    overload_processed: Int
+    overload_recovered: Bool
+    sequence: Int
+    air_quality: Float
+    last_decision: Text
+    last_action: Text
+    last_reason: Text
+    home_started: Bool
+    ventilation_enabled: Bool
+    sensor_loss_detected: Bool
+    safe_state_selected: Bool
+    sensor_recovered: Bool
+    rooms: List<RoomState>
+    timeline: List<LaboratoryEvent>
+    narrative_connected: Bool
+    narrative_build_id: Text
+    narrative_bundle_id: Text
+    narrative_event_id: Int
+    narrative_depth: Int
+    narrative_tasks: List<Text>
+}
+
+extern laboratory HomeLab {
+    target server
+    language go
+    file "user/server/laboratory.go"
+
+    fn resolve_sensor(default_online: Bool) -> Bool
+    fn air_quality_threshold() -> Float
+    fn apply_communication_delay()
+    fn failure_action() -> Text
+    fn record_reading(reading: SensorReading)
+    fn record_decision(decision: HomeDecision)
+    fn current() -> LaboratoryState
+    fn set_fault(command: FaultCommand) -> LaboratoryState
+    fn configure_experiment(command: ExperimentCommand) -> LaboratoryState
+    fn apply_control(command: ControlCommand) -> LaboratoryState
+    fn run_overload(command: OverloadCommand) -> LaboratoryState
+    fn recover(command: RecoveryCommand) -> LaboratoryState
+    fn reset() -> LaboratoryState
+}
+
+extern task HomeLab_resolve_sensor(default_online: Bool) @server -> Bool
+extern task HomeLab_air_quality_threshold() @server -> Float
+extern task HomeLab_apply_communication_delay() @server
+extern task HomeLab_failure_action() @server -> Text
+extern task HomeLab_record_reading(reading: SensorReading) @server
+extern task HomeLab_record_decision(decision: HomeDecision) @server
+extern task HomeLab_current() @server -> LaboratoryState
+extern task HomeLab_set_fault(command: FaultCommand) @server -> LaboratoryState
+extern task HomeLab_configure_experiment(command: ExperimentCommand) @server -> LaboratoryState
+extern task HomeLab_apply_control(command: ControlCommand) @server -> LaboratoryState
+extern task HomeLab_run_overload(command: OverloadCommand) @server -> LaboratoryState
+extern task HomeLab_recover(command: RecoveryCommand) @server -> LaboratoryState
+extern task HomeLab_reset() @server -> LaboratoryState
+
+// Deterministyczny scenariusz symuluje kolejno:
+// stan prawidłowy, złe powietrze, utratę czujnika i jego powrót.
+task HomeScenario() @server -> chan<SensorReading> {
+    state step: Int = 0
+
+    every 1s {
+        step = step + 1
+
+        if step == 1 {
+            send SensorReading {
+                room: "kitchen",
+                celsius: 21.5,
+                humidity: 52.0,
+                air_quality: 510.0,
+                motion: true,
+                online: true,
+                sequence: step,
+                observed_at: now()
+            }
+
+            send SensorReading {
+                room: "bedroom",
+                celsius: 20.5,
+                humidity: 47.0,
+                air_quality: 390.0,
+                motion: false,
+                online: true,
+                sequence: step,
+                observed_at: now()
+            }
+
+            send SensorReading {
+                room: "living-room",
+                celsius: 22.0,
+                humidity: 44.0,
+                air_quality: 420.0,
+                motion: true,
+                online: HomeLab_resolve_sensor(true),
+                sequence: step,
+                observed_at: now()
+            }
+        }
+
+        if step == 2 {
+            send SensorReading {
+                room: "living-room",
+                celsius: 23.0,
+                humidity: 48.0,
+                air_quality: 1250.0,
+                motion: true,
+                online: HomeLab_resolve_sensor(true),
+                sequence: step,
+                observed_at: now()
+            }
+        }
+
+        if step == 3 {
+            send SensorReading {
+                room: "living-room",
+                celsius: 23.0,
+                humidity: 48.0,
+                air_quality: 1250.0,
+                motion: true,
+                online: HomeLab_resolve_sensor(false),
+                sequence: step,
+                observed_at: now()
+            }
+        }
+
+        if step == 4 {
+            send SensorReading {
+                room: "living-room",
+                celsius: 22.5,
+                humidity: 46.0,
+                air_quality: 580.0,
+                motion: true,
+                online: HomeLab_resolve_sensor(true),
+                sequence: step,
+                observed_at: now()
+            }
+            step = 0
+        }
+    }
+}
+
+task HomeDecisionEngine(
+    readings: chan<SensorReading>
+) @server -> chan<HomeDecision> {
+    for reading in readings {
+        HomeLab_apply_communication_delay()
+        HomeLab_record_reading(reading)
+
+        if not reading.online {
+            send HomeDecision {
+                decision_id: "sensor-unavailable",
+                room: reading.room,
+                rule: "require-fresh-sensor",
+                reason: "Czujnik przestał dostarczać świeże dane.",
+                action: HomeLab_failure_action(),
+                safe: true,
+                sequence: reading.sequence,
+                decided_at: now()
+            }
+        }
+
+        if reading.online and reading.air_quality > HomeLab_air_quality_threshold() {
+            send HomeDecision {
+                decision_id: "air-quality-high",
+                room: reading.room,
+                rule: "air-quality-over-configured-threshold",
+                reason: "Jakość powietrza przekroczyła skonfigurowany próg.",
+                action: "enable-ventilation",
+                safe: true,
+                sequence: reading.sequence,
+                decided_at: now()
+            }
+        }
+
+        if reading.online and reading.air_quality <= HomeLab_air_quality_threshold() {
+            send HomeDecision {
+                decision_id: "air-quality-normal",
+                room: reading.room,
+                rule: "air-quality-at-or-below-configured-threshold",
+                reason: "Jakość powietrza mieści się w skonfigurowanym zakresie.",
+                action: "observe",
+                safe: true,
+                sequence: reading.sequence,
+                decided_at: now()
+            }
+        }
+    }
+}
+
+task HomeObserver(
+    decisions: chan<HomeDecision>
+) @server {
+    for decision in decisions {
+        HomeLab_record_decision(decision)
+        log("HOME {decision.sequence}: {decision.room} -> {decision.action} because {decision.rule}")
+    }
+}
+
+task GetLaboratoryState() @server -> LaboratoryState {
+    return HomeLab_current()
+}
+
+task SetLaboratoryFault(command: FaultCommand) @server -> LaboratoryState {
+    return HomeLab_set_fault(command)
+}
+
+task ConfigureLaboratoryExperiment(command: ExperimentCommand) @server -> LaboratoryState {
+    return HomeLab_configure_experiment(command)
+}
+
+task ApplyLaboratoryControl(command: ControlCommand) @server -> LaboratoryState {
+    return HomeLab_apply_control(command)
+}
+
+task RunLaboratoryOverload(command: OverloadCommand) @server -> LaboratoryState {
+    return HomeLab_run_overload(command)
+}
+
+task RecoverLaboratory(command: RecoveryCommand) @server -> LaboratoryState {
+    return HomeLab_recover(command)
+}
+
+task ResetLaboratory() @server -> LaboratoryState {
+    return HomeLab_reset()
+}
+
+protocol rest {
+    GET("/api/laboratory/state", GetLaboratoryState())
+    POST("/api/laboratory/fault", SetLaboratoryFault(body command: FaultCommand))
+    POST("/api/laboratory/experiment", ConfigureLaboratoryExperiment(body command: ExperimentCommand))
+    POST("/api/laboratory/control", ApplyLaboratoryControl(body command: ControlCommand))
+    POST("/api/laboratory/overload", RunLaboratoryOverload(body command: OverloadCommand))
+    POST("/api/laboratory/recover", RecoverLaboratory(body command: RecoveryCommand))
+    POST("/api/laboratory/reset", ResetLaboratory())
+}
+
+pipeline SmartHomeLaboratory {
+    use HomeScenario -> HomeDecisionEngine
+    use HomeDecisionEngine -> HomeObserver
+}
+
+narrative "Smart Home Laboratory" {
+    intent "Show why the home reacts to air quality and sensor availability."
+    stakeholders ["learner", "home-operator"]
+    trace sampled(rate: 100%)
+    applies_to { HomeScenario, HomeDecisionEngine, HomeObserver, GetLaboratoryState, SetLaboratoryFault, ConfigureLaboratoryExperiment, ApplyLaboratoryControl, RunLaboratoryOverload, RecoverLaboratory, ResetLaboratory }
+}

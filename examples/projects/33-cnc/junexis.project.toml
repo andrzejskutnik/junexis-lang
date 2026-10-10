@@ -1,0 +1,4 @@
+name = "cnc-control-demo"
+entry = "src/main.jnx"
+targets = ["embedded", "server", "report"]
+outDir = "out"

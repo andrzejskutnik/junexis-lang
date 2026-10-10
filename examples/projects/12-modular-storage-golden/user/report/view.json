@@ -1,0 +1,19 @@
+{
+  "$schema": "junexis.report-view/0.1",
+  "title": "Dom i trwała pamięć",
+  "layout": "grid",
+  "panels": [
+    {
+      "task": "HomeStoragePanel",
+      "title": "Obserwacje odczytane przez serwer",
+      "fields": [
+        { "path": "provider", "label": "Provider", "format": "text" },
+        { "path": "restored_after_restart", "label": "Odtworzono po restarcie", "format": "boolean" },
+        { "path": "count", "label": "Liczba obserwacji", "format": "number" },
+        { "path": "latest", "label": "Ostatnie obserwacje", "format": "json" },
+        { "path": "build_id", "label": "Build ID", "format": "text" },
+        { "path": "bundle_id", "label": "Bundle ID", "format": "text" }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PackageId>JunexisLang.Compiler.Core</PackageId>
+    <Description>Rdzeń kompilatora wymagany przez bibliotekę wykonawczą Junexis dla .NET.</Description>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Antlr4.Runtime.Standard" />
+    <PackageReference Include="Antlr4BuildTasks" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.Build.Utilities.Core" PrivateAssets="all" />
+    <PackageReference Include="YamlDotNet" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Antlr4 Include="..\..\grammar\JunexisLang.g4">
+      <Generator>MSBuild:Compile</Generator>
+      <CustomToolNamespace>JunexisLang.Compiler.Core.Grammar</CustomToolNamespace>
+    </Antlr4>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="..\profiles\**\*.yaml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>profiles\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>JunexisLang.Compiler.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="PACKAGE.md" Pack="true" PackagePath="README.md" />
+  </ItemGroup>
+
+</Project>

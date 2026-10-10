@@ -1,0 +1,150 @@
+// Laboratorium Junexis — Dom 3: wykonaj decyzję.
+// Decyzja staje się poleceniem, a wykonawca publikuje potwierdzony stan.
+
+struct SensorReading {
+    room: Text
+    air_quality: Float
+    observed_at: Time
+}
+
+struct HomeDecision {
+    room: Text
+    air_quality: Float
+    threshold: Float
+    outcome: Text
+    reason: Text
+    decided_at: Time
+}
+
+struct VentilationCommand {
+    room: Text
+    requested_enabled: Bool
+    cause: Text
+    issued_at: Time
+}
+
+struct VentilationConfirmation {
+    room: Text
+    requested_enabled: Bool
+    actual_enabled: Bool
+    status: Text
+    cause: Text
+    confirmed_at: Time
+}
+
+task LivingRoomSensor() @server -> chan<SensorReading> {
+    config {
+        room: Text : "salon"
+        interval: Duration : 2s
+    }
+
+    state scenario_step: Int = 0
+
+    every config.interval {
+        scenario_step = scenario_step + 1
+
+        if scenario_step == 1 {
+            send SensorReading {
+                room: config.room,
+                air_quality: 420.0,
+                observed_at: now()
+            }
+        }
+
+        if scenario_step == 2 {
+            send SensorReading {
+                room: config.room,
+                air_quality: 1250.0,
+                observed_at: now()
+            }
+            scenario_step = 0
+        }
+    }
+}
+
+task AirQualityDecision(readings: chan<SensorReading>) @server -> chan<HomeDecision> {
+    config {
+        threshold: Float : 1000.0
+    }
+
+    loop {
+        let reading = recv readings
+
+        if reading.air_quality <= config.threshold {
+            send HomeDecision {
+                room: reading.room,
+                air_quality: reading.air_quality,
+                threshold: config.threshold,
+                outcome: "observe",
+                reason: "pomiar nie przekracza progu",
+                decided_at: now()
+            }
+        }
+
+        if reading.air_quality > config.threshold {
+            send HomeDecision {
+                room: reading.room,
+                air_quality: reading.air_quality,
+                threshold: config.threshold,
+                outcome: "enable-ventilation",
+                reason: "pomiar przekracza prog",
+                decided_at: now()
+            }
+        }
+    }
+}
+
+task VentilationController(decisions: chan<HomeDecision>) @server -> chan<VentilationCommand> {
+    loop {
+        let decision = recv decisions
+
+        if decision.outcome == "observe" {
+            send VentilationCommand {
+                room: decision.room,
+                requested_enabled: false,
+                cause: decision.reason,
+                issued_at: now()
+            }
+        }
+
+        if decision.outcome == "enable-ventilation" {
+            send VentilationCommand {
+                room: decision.room,
+                requested_enabled: true,
+                cause: decision.reason,
+                issued_at: now()
+            }
+        }
+    }
+}
+
+task VentilationActuator(commands: chan<VentilationCommand>) @server -> chan<VentilationConfirmation> {
+    state ventilation_enabled: Bool = false
+
+    loop {
+        let command = recv commands
+        ventilation_enabled = command.requested_enabled
+
+        send VentilationConfirmation {
+            room: command.room,
+            requested_enabled: command.requested_enabled,
+            actual_enabled: ventilation_enabled,
+            status: "applied",
+            cause: command.cause,
+            confirmed_at: now()
+        }
+    }
+}
+
+task ConfirmationPreview(confirmations: chan<VentilationConfirmation>) @server {
+    for confirmation in confirmations {
+        log("WYKONANIE pokoj={confirmation.room} zadano={confirmation.requested_enabled} stan={confirmation.actual_enabled} status={confirmation.status} powod={confirmation.cause}")
+    }
+}
+
+pipeline VentilationExecutionFlow {
+    use LivingRoomSensor -> AirQualityDecision
+    use AirQualityDecision -> VentilationController
+    use VentilationController -> VentilationActuator
+    use VentilationActuator -> ConfirmationPreview
+}

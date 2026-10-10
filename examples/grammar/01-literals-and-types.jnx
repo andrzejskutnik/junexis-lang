@@ -1,0 +1,126 @@
+// grammar/01-literals-and-types.jnx
+// Pokrycie: typeReference, atomicType, communicationType, mapType,
+//           genericType, arrayType, baseType, literal (wszystkie warianty)
+//
+// Używamy struct i fn jako "pojemniki" na typy — parser ćwiczy każdą
+// regułę typeReference bez potrzeby uruchamiania codegenu.
+
+// ─── Typy wbudowane PascalCase ─────────────────────────────────────────
+struct BuiltinTypes {
+    a: Int
+    b: Float
+    c: Bool
+    d: Text
+    e: Symbol
+    f: Time
+    g: Duration
+}
+
+// ─── Typy Numeryczne rozmiarowe (user-defined IDENTIFIER) ─────────────
+struct SizedTypes {
+    a: u8
+    b: u16
+    c: u32
+    d: u64
+    e: i8
+    f: i16
+    g: i32
+    h: i64
+    i: f32
+    j: f64
+}
+
+// ─── Typy komunikacyjne — communicationType ────────────────────────────
+struct CommunicationTypes {
+    ch1: chan<Int>
+    ch2: queue<Text>
+    ch3: stream<Float>
+    ch4: chan<TempReading>     // user-defined element type
+    ch5: queue<[Int]>          // element type to array
+}
+
+// ─── Map ───────────────────────────────────────────────────────────────
+struct MapTypes {
+    m1: Map<Text, Int>
+    m2: Map<Int, [Float]>
+    m3: Map<Symbol, Bool>
+}
+
+// ─── Generic (user-defined) ────────────────────────────────────────────
+struct GenericTypes {
+    g1: Result<Int>
+    g2: Option<Text>
+    g3: Pair<Int, Bool>
+}
+
+// ─── Array ─────────────────────────────────────────────────────────────
+struct ArrayTypes {
+    a1: [Int]
+    a2: [Text]
+    a3: [[Float]]     // zagnieżdżona tablica
+    a4: [chan<Int>]   // tablica kanałów
+}
+
+// ─── Union (typeReference = atomicType (PIPE atomicType)*) ────────────
+struct UnionTypes {
+    u1: Int | Text
+    u2: Bool | Float | Int
+    u3: Option<Int> | Text   // union z generic
+}
+
+// ─── Literały jako wartości domyślne w strukturach ────────────────────
+struct Literals {
+    // Integer (bez i z podkreślnikiem)
+    a: Int = 0
+    b: Int = 255
+    c: Int = 1_000_000
+    d: Int = 0xAB           // hex literal
+
+    // Float
+    e: Float = 3.14
+    f: Float = 1.0e10
+    g: Float = -0.5         // unary minus w expression
+
+    // Bool
+    h: Bool = true
+    i: Bool = false
+
+    // Text (cudzysłów podwójny i pojedynczy)
+    j: Text = "hello world"
+    k: Text = 'single quoted'
+
+    // Duration
+    l: Duration = 100ns
+    m: Duration = 50us
+    n: Duration = 10ms
+    o: Duration = 5s
+    p: Duration = 3m
+    q: Duration = 1h
+    r: Duration = 2d
+
+    // Memory unit
+    s: Int = 32KB
+    t: Int = 512MB
+    u: Int = 4GB
+    v: Int = 1TB
+}
+
+// ─── Triple-quoted string ──────────────────────────────────────────────
+fn multilineText() -> Text {
+    return """
+        Pierwsza linia
+        Druga linia
+        Trzecia linia
+    """
+}
+
+// ─── Raw string (@"...") ──────────────────────────────────────────────
+fn rawText() -> Text {
+    return @"C:\Users\janko\path\to\file.jnx"
+}
+
+// ─── Pomocniczy typ dla innych plików ─────────────────────────────────
+struct TempReading {
+    value: Float
+    unit:  Text
+}

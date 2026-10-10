@@ -1,0 +1,44 @@
+# ESP32-C3 Platform Profile
+# RISC-V single-core microcontroller with WiFi
+# Phase 27.5 - YAML-based platform profiles
+
+version: "1.0"
+platform: "@embedded"
+variant: "esp32c3"
+
+capabilities:
+  threading: false # Single-core (no RTOS threading in JunexisLang)
+  fileIO: false # No file system by default
+  networking: true # WiFi 802.11 b/g/n
+  async: false # No async/await on embedded
+  dynamicAllocation: true # Heap available
+  realTimeClock: true # RTC peripheral
+  hardwareInterrupts: true # GPIO interrupts
+
+limits:
+  maxMemoryBytes: 409600 # 400 KB SRAM
+  maxConcurrentTasks: 16 # FreeRTOS tasks limit (conservative)
+
+metadata:
+  description: "ESP32-C3 RISC-V microcontroller (single-core, WiFi)"
+  manufacturer: "Espressif Systems"
+  architecture: "RISC-V RV32IMC"
+  frequency: "160MHz"
+  releaseYear: 2020
+
+hardware:
+  ram: "400 KB SRAM"
+  flash: "4 MB (external)"
+  wifi: "802.11 b/g/n"
+  bluetooth: "BLE 5.0"
+
+recommended:
+  useCases:
+    - "IoT sensors with WiFi connectivity"
+    - "Battery-powered wireless devices"
+    - "Smart home automation"
+    - "Low-cost WiFi projects"
+  notRecommended:
+    - "Multi-threaded applications"
+    - "File system operations (no SD card)"
+    - "High-performance computing"
