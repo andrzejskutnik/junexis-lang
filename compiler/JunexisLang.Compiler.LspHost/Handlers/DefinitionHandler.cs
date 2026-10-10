@@ -48,11 +48,9 @@ internal sealed class DefinitionHandler(DocumentStore store) : DefinitionHandler
             Math.Max(0, decl.Line   - 1),
             Math.Max(0, decl.Column - 1));
 
-        var uri = "file:///" + decl.File.Replace('\\', '/');
-
         var loc = new Location
         {
-            Uri   = DocumentUri.From(uri),
+            Uri   = DocumentUri.From(new Uri(Path.GetFullPath(decl.File)).AbsoluteUri),
             Range = new OmniSharp.Extensions.LanguageServer.Protocol.Models.Range(pos, pos)
         };
 

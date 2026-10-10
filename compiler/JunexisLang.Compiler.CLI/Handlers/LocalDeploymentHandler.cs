@@ -944,9 +944,11 @@ internal static class LocalDeploymentHandler
             using var process = Process.GetProcessById(processId);
             if (process.HasExited)
                 return false;
+            var actualStart = process.StartTime.ToUniversalTime();
+            if ((actualStart - expectedStart.UtcDateTime).Duration() > TimeSpan.FromMilliseconds(100))
+                return false;
             var actualPath = process.MainModule?.FileName;
             return actualPath is not null
-                && process.StartTime.ToUniversalTime() == expectedStart.UtcDateTime
                 && string.Equals(
                     Path.GetFullPath(actualPath),
                     Path.GetFullPath(target.ProcessExecutablePath),
