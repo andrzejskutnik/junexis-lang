@@ -945,7 +945,7 @@ internal static class LocalDeploymentHandler
             if (process.HasExited)
                 return false;
             var actualStart = process.StartTime.ToUniversalTime();
-            if ((actualStart - expectedStart.UtcDateTime).Duration() > TimeSpan.FromMilliseconds(100))
+            if ((actualStart - expectedStart.UtcDateTime).Duration() > TimeSpan.FromMilliseconds(10))
                 return false;
             var actualPath = process.MainModule?.FileName;
             return actualPath is not null
