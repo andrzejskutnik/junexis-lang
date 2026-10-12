@@ -357,7 +357,7 @@ public sealed class LocalDeploymentTests
                 ["deploy", "local", "stop", "--session", sessionPath],
                 root);
 
-            Assert.Equal(0, result.ExitCode);
+            Assert.True(result.ExitCode == 0, $"stdout: {result.StandardOutput}\nstderr: {result.StandardError}");
             target.WaitForExit(5000);
             Assert.True(target.HasExited);
 
@@ -457,7 +457,7 @@ public sealed class LocalDeploymentTests
                 ],
                 root);
 
-            Assert.Equal(0, result.ExitCode);
+            Assert.True(result.ExitCode == 0, $"stdout: {result.StandardOutput}\nstderr: {result.StandardError}");
             target.WaitForExit(5000);
             Assert.True(target.HasExited);
             Assert.Contains("\"state\": \"stopped\"", result.StandardOutput, StringComparison.Ordinal);

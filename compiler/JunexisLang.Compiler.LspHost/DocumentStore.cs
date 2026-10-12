@@ -165,8 +165,8 @@ internal sealed class DocumentStore
 
     private static string UriToPath(string uri)
     {
-        if (uri.StartsWith("file:///", StringComparison.OrdinalIgnoreCase))
-            return Uri.UnescapeDataString(uri[8..].Replace('/', Path.DirectorySeparatorChar));
+        if (Uri.TryCreate(uri, UriKind.Absolute, out var documentUri) && documentUri.IsFile)
+            return documentUri.LocalPath;
         return uri;
     }
 
